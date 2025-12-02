@@ -1,5 +1,5 @@
 ﻿<?php
-// Изменение: 2025-01-05 23:00
+// Изменение: 2025-01-05 23:001Слоняра
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\Application;
