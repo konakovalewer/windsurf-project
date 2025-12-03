@@ -1,8 +1,9 @@
-<?php
-// Изменение: 2025-01-05 23:001Слоняра1
+﻿<?php
+// РР·РјРµРЅРµРЅРёРµ: 2025-01-05 23:001РЎР»РѕРЅСЏСЂР°1
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\Application;
+use Bitrix\Main\Data\Cache;
 use Bitrix\Crm\PhaseSemantics;
 
 if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) die();
@@ -19,7 +20,7 @@ class AntiratingReport extends CBitrixComponent
             if (!empty($allowedStages) && !in_array($code, $allowedStages, true)) {
                 continue;
             }
-            // Дополнительно отсечём успех/провал по семантике
+            // Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РѕС‚СЃРµС‡С‘Рј СѓСЃРїРµС…/РїСЂРѕРІР°Р» РїРѕ СЃРµРјР°РЅС‚РёРєРµ
             $semantic = $this->getStageSemantic($code);
             if ($semantic === null || $semantic === '') {
                 $semantic = \CCrmLead::GetSemanticID($code);
@@ -91,7 +92,7 @@ class AntiratingReport extends CBitrixComponent
             return PhaseSemantics::isFinal($semanticUpper);
         }
 
-        // Fallback: detect typical финальные коды, даже если в статусе нет семантики
+        // Fallback: detect typical С„РёРЅР°Р»СЊРЅС‹Рµ РєРѕРґС‹, РґР°Р¶Рµ РµСЃР»Рё РІ СЃС‚Р°С‚СѓСЃРµ РЅРµС‚ СЃРµРјР°РЅС‚РёРєРё
         $plainCode = strtoupper(strpos($stageCode, ':') !== false ? substr($stageCode, strrpos($stageCode, ':') + 1) : $stageCode);
         $finalCodes = ['CONVERTED', 'JUNK', 'WON', 'LOST', 'LOSE', 'FAILED', 'S', 'F'];
         return in_array($plainCode, $finalCodes, true);
@@ -99,13 +100,12 @@ class AntiratingReport extends CBitrixComponent
 
     protected function getLeadsByManager($managerId, ?\Bitrix\Main\Type\DateTime $dateFrom = null, ?\Bitrix\Main\Type\DateTime $dateTo = null)
     {
-        $leadIds = [];
+        $result = [];
 
         if ($managerId <= 0) {
-            return $leadIds;
+            return $result;
         }
 
-        // Надёжный вариант — GetListEx
         $filter = [
             'ASSIGNED_BY_ID' => $managerId,
             'CHECK_PERMISSIONS' => 'N'
@@ -118,23 +118,40 @@ class AntiratingReport extends CBitrixComponent
             $filter['<=DATE_CREATE'] = $dateTo;
         }
 
+        $cacheTtl = 300;
+        $cacheId = 'leads_' . md5($managerId . '|' . ($dateFrom ? $dateFrom->toString() : '') . '|' . ($dateTo ? $dateTo->toString() : ''));
+        $cacheDir = '/custom/antirating/leads';
+        $cache = Cache::createInstance();
+
+        if ($cache->initCache($cacheTtl, $cacheId, $cacheDir)) {
+            $cached = $cache->getVars();
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
+
         $res = \CCrmLead::GetListEx(
-            ['ID' => 'ASC'],                       // сортировка
-            $filter,                                // фильтр
-            false, false,                           // группировка и постраничка
-            ['ID']                                  // выбираемые поля
+            ['ID' => 'ASC'],
+            $filter,
+            false,
+            false,
+            ['ID', 'DATE_CREATE', 'STATUS_ID']
         );
 
         if ($res && is_object($res)) {
             while ($l = $res->Fetch()) {
-                $leadIds[] = (int)$l['ID'];
+                $leadId = (int)$l['ID'];
+                $result[$leadId] = $l;
             }
         }
 
-        return $leadIds;
-    }
+        if ($cache->startDataCache()) {
+            $cache->endDataCache($result);
+        }
 
-        protected function getHistoryEntriesForLead($leadId)
+        return $result;
+    }
+protected function getHistoryEntriesForLead($leadId)
         {
             $entries = [];
 
@@ -142,7 +159,7 @@ class AntiratingReport extends CBitrixComponent
                 return $entries;
             }
 
-            // Используем только события как резервный источник
+            // РСЃРїРѕР»СЊР·СѓРµРј С‚РѕР»СЊРєРѕ СЃРѕР±С‹С‚РёСЏ РєР°Рє СЂРµР·РµСЂРІРЅС‹Р№ РёСЃС‚РѕС‡РЅРёРє
             if (class_exists('CCrmEvent')) {
                 try {
                     $ev = \CCrmEvent::GetList(
@@ -162,7 +179,7 @@ class AntiratingReport extends CBitrixComponent
                         }
                     }
                 } catch (\Exception $e) {
-                    // игнорируем
+                    // РёРіРЅРѕСЂРёСЂСѓРµРј
                 }
             }
 
@@ -431,7 +448,7 @@ class AntiratingReport extends CBitrixComponent
             $allowedManagers = [157, 12, 39, 67, 130, 290, 2681];
 
             $request = Application::getInstance()->getContext()->getRequest();
-            // По умолчанию обходим всех разрешённых; сузить выбор можно только при явном флаге FILTER_MANAGER=Y
+            // РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РѕР±С…РѕРґРёРј РІСЃРµС… СЂР°Р·СЂРµС€С‘РЅРЅС‹С…; СЃСѓР·РёС‚СЊ РІС‹Р±РѕСЂ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РїСЂРё СЏРІРЅРѕРј С„Р»Р°РіРµ FILTER_MANAGER=Y
             $managerIdRaw = $request->get('MANAGER_ID');
             $requestedManagerId = (int)$managerIdRaw;
             $managerFilterApplied = ($request->get('FILTER_MANAGER') === 'Y' && in_array($requestedManagerId, $allowedManagers, true));
@@ -439,11 +456,11 @@ class AntiratingReport extends CBitrixComponent
             $managersToProcess = $managerFilterApplied ? [$requestedManagerId] : $allowedManagers;
             $managerId = $managerFilterApplied ? $requestedManagerId : 0;
 
-            // Ограничиваем по стадиям процесса
+            // РћРіСЂР°РЅРёС‡РёРІР°РµРј РїРѕ СЃС‚Р°РґРёСЏРј РїСЂРѕС†РµСЃСЃР°
             $statusMap = $this->getAllStatusesMap();
             $allStages = array_keys($statusMap);
 
-            // Получаем имена доступных ответственных
+            // РџРѕР»СѓС‡Р°РµРј РёРјРµРЅР° РґРѕСЃС‚СѓРїРЅС‹С… РѕС‚РІРµС‚СЃС‚РІРµРЅРЅС‹С…
             $managerNameMap = [];
             $usersRes = \Bitrix\Main\UserTable::getList([
                 'select' => ['ID','NAME','LAST_NAME'],
@@ -453,7 +470,7 @@ class AntiratingReport extends CBitrixComponent
                 $managerNameMap[(int)$u['ID']] = trim(($u['NAME'] ?? '') . ' ' . ($u['LAST_NAME'] ?? ''));
             }
 
-            // Инициализируем массив для отчёта
+            // РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РјР°СЃСЃРёРІ РґР»СЏ РѕС‚С‡С‘С‚Р°
             $data = [];
             foreach ($managersToProcess as $managerIdItem) {
                 $managerNameItem = $managerNameMap[$managerIdItem] ?? ('ID ' . $managerIdItem);
@@ -463,7 +480,7 @@ class AntiratingReport extends CBitrixComponent
                 }
             }
 
-            // Получаем все лиды менеджера
+            // РџРѕР»СѓС‡Р°РµРј РІСЃРµ Р»РёРґС‹ РјРµРЅРµРґР¶РµСЂР°
             $request = Application::getInstance()->getContext()->getRequest();
             $dateFromRaw = $request->get('DATE_FROM') ?? ($this->arParams['DATE_FROM'] ?? null);
             $dateToRaw = $request->get('DATE_TO') ?? ($this->arParams['DATE_TO'] ?? null);
@@ -475,15 +492,14 @@ class AntiratingReport extends CBitrixComponent
             $leadTotals = [];
             foreach ($managersToProcess as $managerIdItem) {
                 $managerName = $managerNameMap[$managerIdItem] ?? ('ID ' . $managerIdItem);
-                $leadIds = $this->getLeadsByManager($managerIdItem, $dateFrom, $dateTo);
-                $leadTotals[$managerName] = count($leadIds);
-                if (empty($leadIds)) {
+                $leadRows = $this->getLeadsByManager($managerIdItem, $dateFrom, $dateTo);
+                $leadTotals[$managerName] = count($leadRows);
+                if (empty($leadRows)) {
                     continue;
                 }
 
-                foreach ($leadIds as $leadId) {
-                    $lead = \CCrmLead::GetByID($leadId, true);
-                    if (!$lead) {
+                foreach ($leadRows as $leadId => $lead) {
+                    if (empty($lead)) {
                         continue;
                     }
 
@@ -591,7 +607,7 @@ class AntiratingReport extends CBitrixComponent
                 }
             }
 
-            // Рассчитываем баллы по нормативам
+            // Р Р°СЃСЃС‡РёС‚С‹РІР°РµРј Р±Р°Р»Р»С‹ РїРѕ РЅРѕСЂРјР°С‚РёРІР°Рј
             $defaultNormDays = 5.0;
             $normativeDaysByStage = [
                 'NEW' => 1.0
@@ -624,7 +640,7 @@ class AntiratingReport extends CBitrixComponent
             }
             $scores['CLOSURE'] = $this->calculateScoresByNorm($closureAverages, $defaultNormDays);
 
-            // Общая сумма баллов по лидам (время до закрытия + все стадии)
+            // РћР±С‰Р°СЏ СЃСѓРјРјР° Р±Р°Р»Р»РѕРІ РїРѕ Р»РёРґР°Рј (РІСЂРµРјСЏ РґРѕ Р·Р°РєСЂС‹С‚РёСЏ + РІСЃРµ СЃС‚Р°РґРёРё)
             $leadScoreTotals = [];
             foreach (array_keys($data) as $managerName) {
                 $sumScore = 0;
@@ -639,7 +655,7 @@ class AntiratingReport extends CBitrixComponent
                 $leadScoreTotals[$managerName] = $sumScore;
             }
 
-            // Контакты
+            // РљРѕРЅС‚Р°РєС‚С‹
             $contactsData = [];
             foreach ($managersToProcess as $managerIdItem) {
                 $managerName = $managerNameMap[$managerIdItem] ?? ('ID ' . $managerIdItem);
@@ -660,27 +676,45 @@ class AntiratingReport extends CBitrixComponent
                     $contactFilter['<=DATE_CREATE'] = $dateTo;
                 }
 
-                $contactRes = \CCrmContact::GetListEx(
-                    ['ID' => 'ASC'],
-                    $contactFilter,
-                    false,
-                    false,
-                    ['ID', 'POST', 'UF_CRM_5D4832E6850FC']
-                );
+                $contactCacheTtl = 300;
+                $contactCacheId = 'contacts_' . md5($managerIdItem . '|' . ($dateFrom ? $dateFrom->toString() : '') . '|' . ($dateTo ? $dateTo->toString() : ''));
+                $contactCacheDir = '/custom/antirating/contacts';
+                $contactCache = Cache::createInstance();
 
-                while ($c = $contactRes->Fetch()) {
-                    $contactsData[$managerName]['TOTAL'] += 1;
-                    $interest = $c['UF_CRM_5D4832E6850FC'] ?? null;
-                    $post = $c['POST'] ?? '';
-                    $isEmptyInterest = is_array($interest) ? empty(array_filter($interest)) : (trim((string)$interest) === '');
-                    $isEmptyPost = trim((string)$post) === '';
-                    if ($isEmptyInterest || $isEmptyPost) {
-                        $contactsData[$managerName]['INCOMPLETE'] += 1;
-                    }
+                $cachedContacts = null;
+                if ($contactCache->initCache($contactCacheTtl, $contactCacheId, $contactCacheDir)) {
+                    $cachedContacts = $contactCache->getVars();
                 }
 
-                if ($contactsData[$managerName]['TOTAL'] > 0) {
-                    $contactsData[$managerName]['PERCENT'] = ($contactsData[$managerName]['INCOMPLETE'] / max(1, $contactsData[$managerName]['TOTAL'])) * 100.0;
+                if (is_array($cachedContacts)) {
+                    $contactsData[$managerName] = $cachedContacts;
+                } else {
+                    $contactRes = \CCrmContact::GetListEx(
+                        ['ID' => 'ASC'],
+                        $contactFilter,
+                        false,
+                        false,
+                        ['ID', 'POST', 'UF_CRM_5D4832E6850FC']
+                    );
+
+                    while ($c = $contactRes->Fetch()) {
+                        $contactsData[$managerName]['TOTAL'] += 1;
+                        $interest = $c['UF_CRM_5D4832E6850FC'] ?? null;
+                        $post = $c['POST'] ?? '';
+                        $isEmptyInterest = is_array($interest) ? empty(array_filter($interest)) : (trim((string)$interest) === '');
+                        $isEmptyPost = trim((string)$post) === '';
+                        if ($isEmptyInterest || $isEmptyPost) {
+                            $contactsData[$managerName]['INCOMPLETE'] += 1;
+                        }
+                    }
+
+                    if ($contactsData[$managerName]['TOTAL'] > 0) {
+                        $contactsData[$managerName]['PERCENT'] = ($contactsData[$managerName]['INCOMPLETE'] / max(1, $contactsData[$managerName]['TOTAL'])) * 100.0;
+                    }
+
+                    if ($contactCache->startDataCache()) {
+                        $contactCache->endDataCache($contactsData[$managerName]);
+                    }
                 }
             }
 
@@ -690,7 +724,7 @@ class AntiratingReport extends CBitrixComponent
             }
             $contactsScores = $this->calculateScoresByNorm($contactPercents, 0.0);
 
-            // Передаём данные в шаблон
+            // РџРµСЂРµРґР°С‘Рј РґР°РЅРЅС‹Рµ РІ С€Р°Р±Р»РѕРЅ
             $this->arResult['stages'] = $allStages;
             $this->arResult['statusMap'] = $statusMap;
             $this->arResult['data'] = $data;
@@ -707,24 +741,24 @@ class AntiratingReport extends CBitrixComponent
             ];
             $this->arResult['generatedAt'] = date('c');
 
-            // Контрольное число по первой таблице (сумма всех выводимых числовых значений)
+            // РљРѕРЅС‚СЂРѕР»СЊРЅРѕРµ С‡РёСЃР»Рѕ РїРѕ РїРµСЂРІРѕР№ С‚Р°Р±Р»РёС†Рµ (СЃСѓРјРјР° РІСЃРµС… РІС‹РІРѕРґРёРјС‹С… С‡РёСЃР»РѕРІС‹С… Р·РЅР°С‡РµРЅРёР№)
             $controlSum = 0.0;
             foreach ($data as $managerName => $stagesData) {
-                $controlSum += (float)($leadTotals[$managerName] ?? 0); // Всего лидов
-                $controlSum += (float)($leadScoreTotals[$managerName] ?? 0); // Всего баллов
+                $controlSum += (float)($leadTotals[$managerName] ?? 0); // Р’СЃРµРіРѕ Р»РёРґРѕРІ
+                $controlSum += (float)($leadScoreTotals[$managerName] ?? 0); // Р’СЃРµРіРѕ Р±Р°Р»Р»РѕРІ
 
-                // Время до закрытия (среднее в днях)
+                // Р’СЂРµРјСЏ РґРѕ Р·Р°РєСЂС‹С‚РёСЏ (СЃСЂРµРґРЅРµРµ РІ РґРЅСЏС…)
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
                     $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
                     $controlSum += (float)$avgDays;
                 }
-                // Балл по закрытию
+                // Р‘Р°Р»Р» РїРѕ Р·Р°РєСЂС‹С‚РёСЋ
                 if (isset($scores['CLOSURE'][$managerName])) {
                     $controlSum += (float)$scores['CLOSURE'][$managerName];
                 }
 
-                // По стадиям
+                // РџРѕ СЃС‚Р°РґРёСЏРј
                 foreach ($allStages as $stageCode) {
                     $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
@@ -742,7 +776,7 @@ class AntiratingReport extends CBitrixComponent
             $this->arResult['controlSum'] = $controlSum;
             $this->arResult['executionSeconds'] = microtime(true) - $startTime;
 
-            // Создание задач временно отключено по запросу (оставлено для будущего использования)
+            // РЎРѕР·РґР°РЅРёРµ Р·Р°РґР°С‡ РІСЂРµРјРµРЅРЅРѕ РѕС‚РєР»СЋС‡РµРЅРѕ РїРѕ Р·Р°РїСЂРѕСЃСѓ (РѕСЃС‚Р°РІР»РµРЅРѕ РґР»СЏ Р±СѓРґСѓС‰РµРіРѕ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ)
             /*
             if (empty($leadScoreTotals)) {
                 $this->logMessage('tasks: leadScoreTotals is empty, task not created');
@@ -751,11 +785,11 @@ class AntiratingReport extends CBitrixComponent
             } else {
                 $lines = [];
                 foreach ($leadScoreTotals as $managerName => $scoreSum) {
-                    $lines[] = $managerName . ': ' . (int)$scoreSum . ' балл(ов)';
+                    $lines[] = $managerName . ': ' . (int)$scoreSum . ' Р±Р°Р»Р»(РѕРІ)';
                 }
-                $description = "Итоги антирейтинга по лидам за выбранный период:\n" . implode("\n", $lines);
+                $description = "РС‚РѕРіРё Р°РЅС‚РёСЂРµР№С‚РёРЅРіР° РїРѕ Р»РёРґР°Рј Р·Р° РІС‹Р±СЂР°РЅРЅС‹Р№ РїРµСЂРёРѕРґ:\n" . implode("\n", $lines);
                 $taskFields = [
-                    'TITLE' => 'Антирейтинг: итоги по лидам',
+                    'TITLE' => 'РђРЅС‚РёСЂРµР№С‚РёРЅРі: РёС‚РѕРіРё РїРѕ Р»РёРґР°Рј',
                     'DESCRIPTION' => $description,
                     'RESPONSIBLE_ID' => 2811,
                     'CREATED_BY' => 2811
@@ -770,7 +804,7 @@ class AntiratingReport extends CBitrixComponent
                     }
                 } catch (\Throwable $e) {
                     $this->logMessage('tasks: exception ' . $e->getMessage());
-                    // не мешаем отчёту при ошибке создания задачи
+                    // РЅРµ РјРµС€Р°РµРј РѕС‚С‡С‘С‚Сѓ РїСЂРё РѕС€РёР±РєРµ СЃРѕР·РґР°РЅРёСЏ Р·Р°РґР°С‡Рё
                 }
             }
             */
@@ -785,7 +819,7 @@ class AntiratingReport extends CBitrixComponent
             try {
                 file_put_contents($logFile, $prefix . $text . PHP_EOL, FILE_APPEND | LOCK_EX);
             } catch (\Throwable $e) {
-                // тихо игнорируем, чтобы не ломать отчёт
+                // С‚РёС…Рѕ РёРіРЅРѕСЂРёСЂСѓРµРј, С‡С‚РѕР±С‹ РЅРµ Р»РѕРјР°С‚СЊ РѕС‚С‡С‘С‚
             }
         }
 
@@ -831,3 +865,4 @@ class AntiratingReport extends CBitrixComponent
             return $scores;
         }
     }
+
