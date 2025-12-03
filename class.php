@@ -741,10 +741,18 @@ protected function getHistoryEntriesForLead($leadId)
 
             $startTime = microtime(true);
 
+            require_once __DIR__ . '/lib/DateConverter.php';
+            require_once __DIR__ . '/lib/LeadReportService.php';
+            require_once __DIR__ . '/lib/ContactReportService.php';
+            require_once __DIR__ . '/lib/Logger.php';
+
+            $converter = new DateConverter();
+            $leadService = new LeadReportService($converter);
+            $contactService = new ContactReportService();
+
             $allowedManagers = [157, 12, 39, 67, 130, 290, 2681];
 
             $request = Application::getInstance()->getContext()->getRequest();
-            // РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РѕР±С…РѕРґРёРј РІСЃРµС… СЂР°Р·СЂРµС€С‘РЅРЅС‹С…; СЃСѓР·РёС‚СЊ РІС‹Р±РѕСЂ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РїСЂРё СЏРІРЅРѕРј С„Р»Р°РіРµ FILTER_MANAGER=Y
             $managerIdRaw = $request->get('MANAGER_ID');
             $requestedManagerId = (int)$managerIdRaw;
             $managerFilterApplied = ($request->get('FILTER_MANAGER') === 'Y' && in_array($requestedManagerId, $allowedManagers, true));
@@ -752,11 +760,9 @@ protected function getHistoryEntriesForLead($leadId)
             $managersToProcess = $managerFilterApplied ? [$requestedManagerId] : $allowedManagers;
             $managerId = $managerFilterApplied ? $requestedManagerId : 0;
 
-            // РћРіСЂР°РЅРёС‡РёРІР°РµРј РїРѕ СЃС‚Р°РґРёСЏРј РїСЂРѕС†РµСЃСЃР°
             $statusMap = $this->getAllStatusesMap();
             $allStages = array_keys($statusMap);
 
-            // РџРѕР»СѓС‡Р°РµРј РёРјРµРЅР° РґРѕСЃС‚СѓРїРЅС‹С… РѕС‚РІРµС‚СЃС‚РІРµРЅРЅС‹С…
             $managerNameMap = [];
             $usersRes = \Bitrix\Main\UserTable::getList([
                 'select' => ['ID','NAME','LAST_NAME'],
@@ -766,261 +772,22 @@ protected function getHistoryEntriesForLead($leadId)
                 $managerNameMap[(int)$u['ID']] = trim(($u['NAME'] ?? '') . ' ' . ($u['LAST_NAME'] ?? ''));
             }
 
-            // РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РјР°СЃСЃРёРІ РґР»СЏ РѕС‚С‡С‘С‚Р°
-            $data = [];
-            foreach ($managersToProcess as $managerIdItem) {
-                $managerNameItem = $managerNameMap[$managerIdItem] ?? ('ID ' . $managerIdItem);
-                $data[$managerNameItem] = [];
-                foreach ($allStages as $stCode) {
-                    $data[$managerNameItem][$stCode] = ['COUNT' => 0, 'TIME' => 0.0];
-                }
-            }
-
-            // РџРѕР»СѓС‡Р°РµРј РІСЃРµ Р»РёРґС‹ РјРµРЅРµРґР¶РµСЂР°
-            $request = Application::getInstance()->getContext()->getRequest();
             $dateFromRaw = $request->get('DATE_FROM') ?? ($this->arParams['DATE_FROM'] ?? null);
             $dateToRaw = $request->get('DATE_TO') ?? ($this->arParams['DATE_TO'] ?? null);
-
             $dateFrom = $this->parseDateParam($dateFromRaw);
             $dateTo = $this->parseDateParam($dateToRaw);
 
-            $closureStats = [];
-            $leadTotals = [];
-            foreach ($managersToProcess as $managerIdItem) {
-                $managerName = $managerNameMap[$managerIdItem] ?? ('ID ' . $managerIdItem);
-                $leadRows = $this->getLeadsByManager($managerIdItem, $dateFrom, $dateTo);
-                $leadTotals[$managerName] = count($leadRows);
-                if (empty($leadRows)) {
-                    continue;
-                }
+            $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages);
+            $data = $leadsReport['data'];
+            $closureStats = $leadsReport['closureStats'];
+            $scores = $leadsReport['scores'];
+            $leadTotals = $leadsReport['leadTotals'];
+            $leadScoreTotals = $leadsReport['leadScoreTotals'];
 
-                foreach ($leadRows as $leadId => $lead) {
-                    if (empty($lead)) {
-                        continue;
-                    }
+            $contactsReport = $contactService->buildContactsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo);
+            $contactsData = $contactsReport['contactsData'];
+            $contactsScores = $contactsReport['contactsScores'];
 
-                    $countedStages = [];
-                    $statusHistoryEntries = $this->getStatusHistoryEntriesForLead($leadId);
-                    $usedTimeline = false;
-
-                    if (!empty($statusHistoryEntries)) {
-                        $historyEntries = $statusHistoryEntries;
-                    } else {
-                        $timelineChanges = $this->getTimelineStageChanges($leadId);
-                        $timelineDurations = $this->calculateDurationsFromTimeline($lead, $statusMap, $timelineChanges);
-                        if (!empty($timelineDurations)) {
-                            $usedTimeline = true;
-                            foreach ($timelineDurations as $stageCode => $minutes) {
-                                if (!isset($data[$managerName][$stageCode])) {
-                                    $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
-                                }
-                                $data[$managerName][$stageCode]['TIME'] += $minutes;
-
-                                if (!isset($countedStages[$stageCode])) {
-                                    $data[$managerName][$stageCode]['COUNT'] += 1;
-                                    $countedStages[$stageCode] = true;
-                                }
-                            }
-
-                            $closureDuration = $this->getClosureDurationMinutes($lead, $timelineChanges);
-                            if ($closureDuration !== null) {
-                                if (!isset($closureStats[$managerName])) {
-                                    $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
-                                }
-                                $closureStats[$managerName]['SUM'] += $closureDuration;
-                                $closureStats[$managerName]['COUNT'] += 1;
-                            }
-
-                            if ($closureDuration === null) {
-                                $eventEntries = $this->getHistoryEntriesForLead($leadId);
-                                $closureDuration = $this->getClosureDurationFromHistory($lead, $eventEntries);
-                                if ($closureDuration !== null) {
-                                    if (!isset($closureStats[$managerName])) {
-                                        $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
-                                    }
-                                    $closureStats[$managerName]['SUM'] += $closureDuration;
-                                    $closureStats[$managerName]['COUNT'] += 1;
-                                }
-                            }
-                        } else {
-                            $historyEntries = $this->getHistoryEntriesForLead($leadId);
-                        }
-                    }
-
-                    if ($usedTimeline) {
-                        continue;
-                    }
-
-                    if (empty($historyEntries)) {
-                        continue;
-                    }
-
-                    usort($historyEntries, function ($a, $b) {
-                        return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
-                    });
-
-                    $count = count($historyEntries);
-                    $finalClosureMinutes = null;
-                    for ($i = 0; $i < $count; $i++) {
-                        $cur = $historyEntries[$i];
-                        $startTs = $this->convertDbStringToTimestamp($cur['CREATED_TIME']);
-                        $endSource = ($i + 1 < $count) ? $historyEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
-                        $endTs = $this->convertDbStringToTimestamp($endSource);
-
-                        if ($startTs === null || $endTs === null) {
-                            continue;
-                        }
-
-                        $minutes = max(0, ($endTs - $startTs) / 60.0);
-
-                        $stageCode = $cur['STAGE_ID'];
-                        if (!isset($data[$managerName][$stageCode])) {
-                            $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
-                        }
-
-                        $data[$managerName][$stageCode]['TIME'] += $minutes;
-
-                        if (!isset($countedStages[$stageCode])) {
-                            $data[$managerName][$stageCode]['COUNT'] += 1;
-                            $countedStages[$stageCode] = true;
-                        }
-
-                        if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
-                            $createTs = $this->convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
-                            if ($createTs !== null) {
-                                $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
-                            }
-                        }
-                    }
-
-                    if ($finalClosureMinutes !== null) {
-                        if (!isset($closureStats[$managerName])) {
-                            $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
-                        }
-                        $closureStats[$managerName]['SUM'] += $finalClosureMinutes;
-                        $closureStats[$managerName]['COUNT'] += 1;
-                    }
-                }
-            }
-
-            // Р Р°СЃСЃС‡РёС‚С‹РІР°РµРј Р±Р°Р»Р»С‹ РїРѕ РЅРѕСЂРјР°С‚РёРІР°Рј
-            $defaultNormDays = 5.0;
-            $normativeDaysByStage = [
-                'NEW' => 1.0
-            ];
-
-            $stageAverages = [];
-            foreach ($allStages as $stCode) {
-                foreach ($data as $managerName => $stagesData) {
-                    $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
-                    $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
-                    $stageAverages[$stCode][$managerName] = $avgDaysStage;
-                }
-            }
-
-            $closureAverages = [];
-            foreach ($data as $managerName => $_) {
-                $closure = $closureStats[$managerName] ?? null;
-                if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
-                } else {
-                    $closureAverages[$managerName] = null;
-                }
-            }
-
-            $scores = [];
-            foreach ($stageAverages as $stageCode => $values) {
-                $norm = $normativeDaysByStage[strtoupper($stageCode)] ?? $defaultNormDays;
-                $scores[$stageCode] = $this->calculateScoresByNorm($values, $norm);
-            }
-            $scores['CLOSURE'] = $this->calculateScoresByNorm($closureAverages, $defaultNormDays);
-
-            // РћР±С‰Р°СЏ СЃСѓРјРјР° Р±Р°Р»Р»РѕРІ РїРѕ Р»РёРґР°Рј (РІСЂРµРјСЏ РґРѕ Р·Р°РєСЂС‹С‚РёСЏ + РІСЃРµ СЃС‚Р°РґРёРё)
-            $leadScoreTotals = [];
-            foreach (array_keys($data) as $managerName) {
-                $sumScore = 0;
-                if (isset($scores['CLOSURE'][$managerName])) {
-                    $sumScore += (int)$scores['CLOSURE'][$managerName];
-                }
-                foreach ($allStages as $stCode) {
-                    if (isset($scores[$stCode][$managerName])) {
-                        $sumScore += (int)$scores[$stCode][$managerName];
-                    }
-                }
-                $leadScoreTotals[$managerName] = $sumScore;
-            }
-
-            // РљРѕРЅС‚Р°РєС‚С‹
-            $contactsData = [];
-            foreach ($managersToProcess as $managerIdItem) {
-                $managerName = $managerNameMap[$managerIdItem] ?? ('ID ' . $managerIdItem);
-                $contactsData[$managerName] = [
-                    'TOTAL' => 0,
-                    'INCOMPLETE' => 0,
-                    'PERCENT' => null
-                ];
-
-                $contactFilter = [
-                    'ASSIGNED_BY_ID' => $managerIdItem,
-                    'CHECK_PERMISSIONS' => 'N'
-                ];
-                if ($dateFrom instanceof \Bitrix\Main\Type\DateTime) {
-                    $contactFilter['>=DATE_CREATE'] = $dateFrom;
-                }
-                if ($dateTo instanceof \Bitrix\Main\Type\DateTime) {
-                    $contactFilter['<=DATE_CREATE'] = $dateTo;
-                }
-
-                $contactCacheTtl = 300;
-                $contactCacheId = 'contacts_' . md5($managerIdItem . '|' . ($dateFrom ? $dateFrom->toString() : '') . '|' . ($dateTo ? $dateTo->toString() : ''));
-                $contactCacheDir = '/custom/antirating/contacts';
-                $contactCache = Cache::createInstance();
-
-                $cachedContacts = null;
-                if ($contactCache->initCache($contactCacheTtl, $contactCacheId, $contactCacheDir)) {
-                    $cachedContacts = $contactCache->getVars();
-                }
-
-                if (is_array($cachedContacts)) {
-                    $contactsData[$managerName] = $cachedContacts;
-                } else {
-                    $contactRes = \CCrmContact::GetListEx(
-                        ['ID' => 'ASC'],
-                        $contactFilter,
-                        false,
-                        false,
-                        ['ID', 'POST', 'UF_CRM_5D4832E6850FC']
-                    );
-
-                    while ($c = $contactRes->Fetch()) {
-                        $contactsData[$managerName]['TOTAL'] += 1;
-                        $interest = $c['UF_CRM_5D4832E6850FC'] ?? null;
-                        $post = $c['POST'] ?? '';
-                        $isEmptyInterest = is_array($interest) ? empty(array_filter($interest)) : (trim((string)$interest) === '');
-                        $isEmptyPost = trim((string)$post) === '';
-                        if ($isEmptyInterest || $isEmptyPost) {
-                            $contactsData[$managerName]['INCOMPLETE'] += 1;
-                        }
-                    }
-
-                    if ($contactsData[$managerName]['TOTAL'] > 0) {
-                        $contactsData[$managerName]['PERCENT'] = ($contactsData[$managerName]['INCOMPLETE'] / max(1, $contactsData[$managerName]['TOTAL'])) * 100.0;
-                    }
-
-                    if ($contactCache->startDataCache()) {
-                        $contactCache->endDataCache($contactsData[$managerName]);
-                    }
-                }
-            }
-
-            $contactPercents = [];
-            foreach ($contactsData as $managerName => $cData) {
-                $contactPercents[$managerName] = $cData['PERCENT'];
-            }
-            $contactsScores = $this->calculateScoresByNorm($contactPercents, 0.0);
-
-            // РџРµСЂРµРґР°С‘Рј РґР°РЅРЅС‹Рµ РІ С€Р°Р±Р»РѕРЅ
             $this->arResult['stages'] = $allStages;
             $this->arResult['statusMap'] = $statusMap;
             $this->arResult['data'] = $data;
@@ -1037,78 +804,12 @@ protected function getHistoryEntriesForLead($leadId)
             ];
             $this->arResult['generatedAt'] = date('c');
 
-            // РљРѕРЅС‚СЂРѕР»СЊРЅРѕРµ С‡РёСЃР»Рѕ РїРѕ РїРµСЂРІРѕР№ С‚Р°Р±Р»РёС†Рµ (СЃСѓРјРјР° РІСЃРµС… РІС‹РІРѕРґРёРјС‹С… С‡РёСЃР»РѕРІС‹С… Р·РЅР°С‡РµРЅРёР№)
-            $controlSum = 0.0;
-            foreach ($data as $managerName => $stagesData) {
-                $controlSum += (float)($leadTotals[$managerName] ?? 0); // Р’СЃРµРіРѕ Р»РёРґРѕРІ
-                $controlSum += (float)($leadScoreTotals[$managerName] ?? 0); // Р’СЃРµРіРѕ Р±Р°Р»Р»РѕРІ
-
-                // Р’СЂРµРјСЏ РґРѕ Р·Р°РєСЂС‹С‚РёСЏ (СЃСЂРµРґРЅРµРµ РІ РґРЅСЏС…)
-                $closure = $closureStats[$managerName] ?? null;
-                if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
-                    $controlSum += (float)$avgDays;
-                }
-                // Р‘Р°Р»Р» РїРѕ Р·Р°РєСЂС‹С‚РёСЋ
-                if (isset($scores['CLOSURE'][$managerName])) {
-                    $controlSum += (float)$scores['CLOSURE'][$managerName];
-                }
-
-                // РџРѕ СЃС‚Р°РґРёСЏРј
-                foreach ($allStages as $stageCode) {
-                    $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
-                    $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
-
-                    $controlSum += (float)$countVal;
-                    if ($avgDaysStage !== null) {
-                        $controlSum += (float)$avgDaysStage;
-                    }
-                    if (isset($scores[$stageCode][$managerName])) {
-                        $controlSum += (float)$scores[$stageCode][$managerName];
-                    }
-                }
-            }
-            $this->arResult['controlSum'] = $controlSum;
+            $this->arResult['controlSum'] = $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages);
             $this->arResult['executionSeconds'] = microtime(true) - $startTime;
-
-            // РЎРѕР·РґР°РЅРёРµ Р·Р°РґР°С‡ РІСЂРµРјРµРЅРЅРѕ РѕС‚РєР»СЋС‡РµРЅРѕ РїРѕ Р·Р°РїСЂРѕСЃСѓ (РѕСЃС‚Р°РІР»РµРЅРѕ РґР»СЏ Р±СѓРґСѓС‰РµРіРѕ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ)
-            /*
-            if (empty($leadScoreTotals)) {
-                $this->logMessage('tasks: leadScoreTotals is empty, task not created');
-            } elseif (!Loader::includeModule('tasks')) {
-                $this->logMessage('tasks: module not available, task not created');
-            } else {
-                $lines = [];
-                foreach ($leadScoreTotals as $managerName => $scoreSum) {
-                    $lines[] = $managerName . ': ' . (int)$scoreSum . ' Р±Р°Р»Р»(РѕРІ)';
-                }
-                $description = "РС‚РѕРіРё Р°РЅС‚РёСЂРµР№С‚РёРЅРіР° РїРѕ Р»РёРґР°Рј Р·Р° РІС‹Р±СЂР°РЅРЅС‹Р№ РїРµСЂРёРѕРґ:\n" . implode("\n", $lines);
-                $taskFields = [
-                    'TITLE' => 'РђРЅС‚РёСЂРµР№С‚РёРЅРі: РёС‚РѕРіРё РїРѕ Р»РёРґР°Рј',
-                    'DESCRIPTION' => $description,
-                    'RESPONSIBLE_ID' => 2811,
-                    'CREATED_BY' => 2811
-                ];
-                try {
-                    $task = new \CTasks();
-                    $taskId = $task->Add($taskFields);
-                    if ($taskId) {
-                        $this->logMessage('tasks: created task ID ' . $taskId);
-                    } else {
-                        $this->logMessage('tasks: creation returned empty task ID');
-                    }
-                } catch (\Throwable $e) {
-                    $this->logMessage('tasks: exception ' . $e->getMessage());
-                    // РЅРµ РјРµС€Р°РµРј РѕС‚С‡С‘С‚Сѓ РїСЂРё РѕС€РёР±РєРµ СЃРѕР·РґР°РЅРёСЏ Р·Р°РґР°С‡Рё
-                }
-            }
-            */
 
             $this->includeComponentTemplate();
         }
-
-        protected function logMessage(string $text): void
+protected function logMessage(string $text): void
         {
             $logFile = __DIR__ . '/log0212.php';
             $prefix = '[' . date('c') . '] ';
