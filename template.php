@@ -7,6 +7,9 @@ $dateTo = htmlspecialcharsbx($arResult['filterValues']['DATE_TO'] ?? '');
 $scores = $arResult['scores'] ?? [];
 $leadTotals = $arResult['leadTotals'] ?? [];
 $leadScoreTotals = $arResult['leadScoreTotals'] ?? [];
+$generatedAt = $arResult['generatedAt'] ?? '';
+$controlSum = $arResult['controlSum'] ?? null;
+$executionSeconds = $arResult['executionSeconds'] ?? null;
 ?>
 
 <form method="get" name="antirating-filter" style="margin-bottom:16px; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
@@ -110,6 +113,18 @@ $leadScoreTotals = $arResult['leadScoreTotals'] ?? [];
 <?php if (empty($arResult['data'])): ?>
     <p style="color:#666;">Данные не найдены (менеджер ID <?= intval($arResult['managerId'] ?? 0) ?>). Проверьте MANAGER_ID или наличие истории стадий у лидов.</p>
 <?php endif; ?>
+
+<div style="margin-top:12px;">
+    <?php if ($generatedAt): ?>
+        <div>Отчёт сформирован: <?= htmlspecialchars($generatedAt) ?></div>
+    <?php endif; ?>
+    <?php if ($controlSum !== null): ?>
+        <div>Контрольное число (лиды): <?= round((float)$controlSum, 4) ?></div>
+    <?php endif; ?>
+    <?php if ($executionSeconds !== null): ?>
+        <div>Время формирования (сек): <?= round((float)$executionSeconds, 4) ?></div>
+    <?php endif; ?>
+</div>
 
 <h3 style="margin-top:32px;">Контакты</h3>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; margin-top:8px;">

@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Изменение: 2025-01-05 23:001Слоняра1
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
@@ -253,21 +253,21 @@ class AntiratingReport extends CBitrixComponent
             }
 
             usort($changes, function ($a, $b) {
-                $aTs = $this->convertToTimestamp($a['TIME']);
-                $bTs = $this->convertToTimestamp($b['TIME']);
+                $aTs = $this->convertBitrixDateToTimestamp($a['TIME']) ?? $this->convertDbStringToTimestamp($a['TIME']);
+                $bTs = $this->convertBitrixDateToTimestamp($b['TIME']) ?? $this->convertDbStringToTimestamp($b['TIME']);
                 return $aTs <=> $bTs;
             });
 
-            $startTs = $this->convertToTimestamp($lead['DATE_CREATE'] ?? null);
+            $startTs = $this->convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
             if ($startTs === null) {
-                $startTs = $this->convertToTimestamp($changes[0]['TIME']);
+                $startTs = $this->convertBitrixDateToTimestamp($changes[0]['TIME']) ?? $this->convertDbStringToTimestamp($changes[0]['TIME']);
             }
 
             $currentStage = $changes[0]['FROM'] ?? ($lead['STATUS_ID'] ?? null);
             $durations = [];
 
             foreach ($changes as $change) {
-                $changeTs = $this->convertToTimestamp($change['TIME']);
+                $changeTs = $this->convertBitrixDateToTimestamp($change['TIME']) ?? $this->convertDbStringToTimestamp($change['TIME']);
                 if ($changeTs === null) {
                     continue;
                 }
@@ -302,14 +302,14 @@ class AntiratingReport extends CBitrixComponent
                 return null;
             }
 
-            $createTs = $this->convertToTimestamp($lead['DATE_CREATE'] ?? null);
+            $createTs = $this->convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
             if ($createTs === null) {
                 return null;
             }
 
             usort($timelineChanges, function ($a, $b) {
-                $aTs = $this->convertToTimestamp($a['TIME']);
-                $bTs = $this->convertToTimestamp($b['TIME']);
+                $aTs = $this->convertBitrixDateToTimestamp($a['TIME']) ?? $this->convertDbStringToTimestamp($a['TIME']);
+                $bTs = $this->convertBitrixDateToTimestamp($b['TIME']) ?? $this->convertDbStringToTimestamp($b['TIME']);
                 return $aTs <=> $bTs;
             });
 
@@ -319,7 +319,7 @@ class AntiratingReport extends CBitrixComponent
                     continue;
                 }
 
-                $closureTs = $this->convertToTimestamp($change['TIME']);
+                $closureTs = $this->convertBitrixDateToTimestamp($change['TIME']) ?? $this->convertDbStringToTimestamp($change['TIME']);
                 if ($closureTs === null) {
                     continue;
                 }
@@ -340,7 +340,7 @@ class AntiratingReport extends CBitrixComponent
                 return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
             });
 
-            $createTs = $this->convertToTimestamp($lead['DATE_CREATE'] ?? null);
+            $createTs = $this->convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
             if ($createTs === null) {
                 return null;
             }
@@ -351,7 +351,7 @@ class AntiratingReport extends CBitrixComponent
                     continue;
                 }
 
-                $stageTs = $this->convertToTimestamp($entry['CREATED_TIME'] ?? null);
+                $stageTs = $this->convertDbStringToTimestamp($entry['CREATED_TIME'] ?? null);
                 if ($stageTs === null) {
                     continue;
                 }
@@ -362,7 +362,19 @@ class AntiratingReport extends CBitrixComponent
             return null;
         }
 
-        protected function convertToTimestamp($value): ?int
+        protected function convertDbStringToTimestamp(?string $value): ?int
+        {
+            if (!is_string($value) || trim($value) === '') {
+                return null;
+            }
+            try {
+                return (new \DateTime($value, new \DateTimeZone(date_default_timezone_get())))->getTimestamp();
+            } catch (\Exception $e) {
+                return null;
+            }
+        }
+
+        protected function convertBitrixDateToTimestamp($value): ?int
         {
             if ($value instanceof \Bitrix\Main\Type\DateTime) {
                 return $value->getTimestamp();
@@ -372,24 +384,20 @@ class AntiratingReport extends CBitrixComponent
                 return $value->getTimestamp();
             }
 
-            if (is_string($value) && trim($value) !== '') {
-                try {
-                    $bitrixDate = \Bitrix\Main\Type\DateTime::createFromUserTime($value);
-                    if ($bitrixDate instanceof \Bitrix\Main\Type\DateTime) {
-                        return $bitrixDate->getTimestamp();
-                    }
-                } catch (\Throwable $e) {
-                    // fallback ниже
-                }
-
-                try {
-                    return (new \DateTime($value, new \DateTimeZone(date_default_timezone_get())))->getTimestamp();
-                } catch (\Exception $e) {
-                    return null;
-                }
-            }
-
             return null;
+        }
+
+        protected function convertUserDateToTimestamp(?string $value): ?int
+        {
+            if (!is_string($value) || trim($value) === '') {
+                return null;
+            }
+            try {
+                $dt = \Bitrix\Main\Type\DateTime::createFromUserTime($value);
+                return $dt instanceof \Bitrix\Main\Type\DateTime ? $dt->getTimestamp() : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         protected function parseDateParam($value): ?\Bitrix\Main\Type\DateTime
@@ -398,14 +406,9 @@ class AntiratingReport extends CBitrixComponent
                 return null;
             }
 
-            try {
-                $date = \Bitrix\Main\Type\DateTime::createFromUserTime($value);
-            } catch (\Throwable $e) {
-                $date = null;
-            }
-
-            if ($date instanceof \Bitrix\Main\Type\DateTime) {
-                return $date;
+            $ts = $this->convertUserDateToTimestamp($value);
+            if ($ts !== null) {
+                return \Bitrix\Main\Type\DateTime::createFromTimestamp($ts);
             }
 
             try {
@@ -422,6 +425,8 @@ class AntiratingReport extends CBitrixComponent
                 ShowError('CRM module not available');
                 return;
             }
+
+            $startTime = microtime(true);
 
             $allowedManagers = [157, 12, 39, 67, 130, 290, 2681];
 
@@ -546,9 +551,9 @@ class AntiratingReport extends CBitrixComponent
                     $finalClosureMinutes = null;
                     for ($i = 0; $i < $count; $i++) {
                         $cur = $historyEntries[$i];
-                        $startTs = $this->convertToTimestamp($cur['CREATED_TIME']);
+                        $startTs = $this->convertDbStringToTimestamp($cur['CREATED_TIME']);
                         $endSource = ($i + 1 < $count) ? $historyEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
-                        $endTs = $this->convertToTimestamp($endSource);
+                        $endTs = $this->convertDbStringToTimestamp($endSource);
 
                         if ($startTs === null || $endTs === null) {
                             continue;
@@ -569,7 +574,7 @@ class AntiratingReport extends CBitrixComponent
                         }
 
                         if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
-                            $createTs = $this->convertToTimestamp($lead['DATE_CREATE'] ?? null);
+                            $createTs = $this->convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                             if ($createTs !== null) {
                                 $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
                             }
@@ -700,6 +705,42 @@ class AntiratingReport extends CBitrixComponent
                 'DATE_FROM' => $dateFromRaw,
                 'DATE_TO' => $dateToRaw
             ];
+            $this->arResult['generatedAt'] = date('c');
+
+            // Контрольное число по первой таблице (сумма всех выводимых числовых значений)
+            $controlSum = 0.0;
+            foreach ($data as $managerName => $stagesData) {
+                $controlSum += (float)($leadTotals[$managerName] ?? 0); // Всего лидов
+                $controlSum += (float)($leadScoreTotals[$managerName] ?? 0); // Всего баллов
+
+                // Время до закрытия (среднее в днях)
+                $closure = $closureStats[$managerName] ?? null;
+                if ($closure && ($closure['COUNT'] ?? 0) > 0) {
+                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                    $controlSum += (float)$avgDays;
+                }
+                // Балл по закрытию
+                if (isset($scores['CLOSURE'][$managerName])) {
+                    $controlSum += (float)$scores['CLOSURE'][$managerName];
+                }
+
+                // По стадиям
+                foreach ($allStages as $stageCode) {
+                    $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
+                    $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+
+                    $controlSum += (float)$countVal;
+                    if ($avgDaysStage !== null) {
+                        $controlSum += (float)$avgDaysStage;
+                    }
+                    if (isset($scores[$stageCode][$managerName])) {
+                        $controlSum += (float)$scores[$stageCode][$managerName];
+                    }
+                }
+            }
+            $this->arResult['controlSum'] = $controlSum;
+            $this->arResult['executionSeconds'] = microtime(true) - $startTime;
 
             // Создание задач временно отключено по запросу (оставлено для будущего использования)
             /*
