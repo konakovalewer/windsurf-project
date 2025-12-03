@@ -1,13 +1,23 @@
 <?php
-// Print hours spent in stage NEW for the given lead IDs
+// Анализ источников смен этапов по лидам за январь 2025.
+// Лог пишем в /local/components/custom/antirating/log0212.php: формат "LEAD_ID;Y/N;source".
+
 require_once $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php';
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
+use Bitrix\Main\Application;
 
 if (!Loader::includeModule('crm')) {
     die("CRM module not available\n");
 }
+
+// Период: 01.01.2025 00:00:00 - 31.01.2025 23:59:59
+$dateFrom = \Bitrix\Main\Type\DateTime::createFromPhp(new \DateTime('2025-01-01 00:00:00'));
+$dateTo = \Bitrix\Main\Type\DateTime::createFromPhp(new \DateTime('2025-01-31 23:59:59'));
+
+$logFile = $_SERVER['DOCUMENT_ROOT'] . '/local/components/custom/antirating/log0212.php';
+$logPrefix = '[' . date('c') . '] ';
 
 function convertToTimestamp($value): ?int
 {
@@ -34,7 +44,7 @@ function convertToTimestamp($value): ?int
     return null;
 }
 
-function getTimelineStageChanges(int $leadId): array
+function findInTimeline(int $leadId): bool
 {
     $bindingClass = null;
     if (class_exists('\\Bitrix\\Crm\\Timeline\\Entity\\TimelineBindingTable')) {
@@ -51,7 +61,7 @@ function getTimelineStageChanges(int $leadId): array
     }
 
     if (!$bindingClass || !$tableClass) {
-        return [];
+        return false;
     }
 
     $timelineIds = [];
@@ -66,14 +76,13 @@ function getTimelineStageChanges(int $leadId): array
         $timelineIds[] = (int)$bind['OWNER_ID'];
     }
     if (empty($timelineIds)) {
-        return [];
+        return false;
     }
 
-    $changes = [];
     $timelineRows = $tableClass::getList([
         'filter' => ['@ID' => $timelineIds],
         'order' => ['CREATED' => 'ASC'],
-        'select' => ['ID','CREATED','SETTINGS']
+        'select' => ['ID','SETTINGS']
     ]);
 
     while ($row = $timelineRows->fetch()) {
@@ -88,180 +97,117 @@ function getTimelineStageChanges(int $leadId): array
         if (!is_array($settings) || ($settings['FIELD'] ?? null) !== 'STATUS_ID') {
             continue;
         }
-        $changes[] = [
-            'TIME' => $row['CREATED'],
-            'FROM' => $settings['START'] ?? null,
-            'TO' => $settings['FINISH'] ?? null
-        ];
+        return true; // нашли смену статуса
     }
 
-    return $changes;
+    return false;
 }
 
-function getHistoryEntriesForLead($leadId): array
+function findInStatusHistory(int $leadId): bool
 {
-    $entries = [];
-
-    if (!Loader::includeModule('crm')) {
-        return $entries;
+    try {
+        $connection = Application::getConnection();
+        $sql = "SELECT ID FROM b_crm_lead_status_history WHERE OWNER_ID = " . (int)$leadId . " LIMIT 1";
+        $row = $connection->query($sql)->fetch();
+        return $row ? true : false;
+    } catch (\Throwable $e) {
+        return false;
     }
-
-    if (class_exists('\Bitrix\Crm\History\HistoryEntry')) {
-        try {
-            $it = \Bitrix\Crm\History\HistoryEntry::getList([
-                'filter' => [
-                    '=ENTITY_TYPE_ID' => \CCrmOwnerType::Lead,
-                    '=ENTITY_ID' => $leadId
-                ],
-                'order' => ['CREATED_TIME' => 'ASC'],
-                'select' => ['ID','CREATED_TIME','STAGE_ID','STAGE_SEMANTIC_ID']
-            ]);
-
-            while ($row = $it->fetch()) {
-                $stageId = $row['STAGE_ID'] ?: $row['STAGE_SEMANTIC_ID'] ?: null;
-                if ($stageId) {
-                    $entries[] = [
-                        'STAGE_ID' => $stageId,
-                        'CREATED_TIME' => $row['CREATED_TIME']
-                    ];
-                }
-            }
-        } catch (\Exception $e) {
-        }
-    }
-
-    if (empty($entries) && class_exists('CCrmEvent')) {
-        try {
-            $ev = \CCrmEvent::GetList(
-                ['DATE_CREATE' => 'ASC'],
-                ['ENTITY_TYPE' => 'LEAD', 'ENTITY_ID' => $leadId]
-            );
-            while ($row = $ev->Fetch()) {
-                $stageCode = null;
-                if (!empty($row['EVENT_TEXT_2'])) {
-                    $stageCode = trim($row['EVENT_TEXT_2']);
-                }
-                if ($stageCode) {
-                    $entries[] = [
-                        'STAGE_ID' => $stageCode,
-                        'CREATED_TIME' => $row['DATE_CREATE']
-                    ];
-                }
-            }
-        } catch (\Exception $e) {
-        }
-    }
-
-    return $entries;
 }
 
-function calculateDurationsFromTimeline(array $lead, array $changes): array
+function findInHistoryEntry(int $leadId): bool
 {
-    if (empty($changes)) {
-        return [];
+    if (!class_exists('\Bitrix\Crm\History\HistoryEntry')) {
+        return false;
     }
 
-    usort($changes, function ($a, $b) {
-        $aTs = convertToTimestamp($a['TIME']);
-        $bTs = convertToTimestamp($b['TIME']);
-        return $aTs <=> $bTs;
-    });
+    try {
+        $it = \Bitrix\Crm\History\HistoryEntry::getList([
+            'filter' => [
+                '=ENTITY_TYPE_ID' => \CCrmOwnerType::Lead,
+                '=ENTITY_ID' => $leadId
+            ],
+            'order' => ['CREATED_TIME' => 'ASC'],
+            'select' => ['ID','STAGE_ID','STAGE_SEMANTIC_ID']
+        ]);
 
-    $startTs = convertToTimestamp($lead['DATE_CREATE'] ?? null);
-    if ($startTs === null) {
-        $startTs = convertToTimestamp($changes[0]['TIME']);
-    }
-
-    $currentStage = $changes[0]['FROM'] ?? ($lead['STATUS_ID'] ?? null);
-    $durations = [];
-
-    foreach ($changes as $change) {
-        $changeTs = convertToTimestamp($change['TIME']);
-        if ($changeTs === null) {
-            continue;
-        }
-
-        if ($currentStage && $startTs !== null) {
-            $minutes = max(0, ($changeTs - $startTs) / 60.0);
-            if (!isset($durations[$currentStage])) {
-                $durations[$currentStage] = 0.0;
+        while ($row = $it->fetch()) {
+            $stageId = $row['STAGE_ID'] ?: $row['STAGE_SEMANTIC_ID'] ?: null;
+            if ($stageId) {
+                return true;
             }
-            $durations[$currentStage] += $minutes;
         }
-
-        $currentStage = $change['TO'] ?: $currentStage;
-        $startTs = $changeTs;
+    } catch (\Throwable $e) {
     }
 
-    if ($currentStage && $startTs !== null) {
-        $nowTs = time();
-        $minutes = max(0, ($nowTs - $startTs) / 60.0);
-        if (!isset($durations[$currentStage])) {
-            $durations[$currentStage] = 0.0;
-        }
-        $durations[$currentStage] += $minutes;
-    }
-
-    return $durations;
+    return false;
 }
 
-function calculateDurationsFromHistory(array $lead, array $historyEntries): array
+function findInEvents(int $leadId): bool
 {
-    if (empty($historyEntries)) {
-        return [];
+    if (!class_exists('CCrmEvent')) {
+        return false;
     }
-
-    usort($historyEntries, function ($a, $b) {
-        return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
-    });
-
-    $durations = [];
-    $count = count($historyEntries);
-    for ($i = 0; $i < $count; $i++) {
-        $cur = $historyEntries[$i];
-        $startTs = convertToTimestamp($cur['CREATED_TIME']);
-        $endSource = ($i + 1 < $count) ? $historyEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
-        $endTs = convertToTimestamp($endSource);
-
-        if ($startTs === null || $endTs === null) {
-            continue;
+    try {
+        $ev = \CCrmEvent::GetList(
+            ['DATE_CREATE' => 'ASC'],
+            ['ENTITY_TYPE' => 'LEAD', 'ENTITY_ID' => $leadId],
+            false,
+            false,
+            ['ID','EVENT_TEXT_2']
+        );
+        while ($row = $ev->Fetch()) {
+            if (!empty($row['EVENT_TEXT_2'])) {
+                return true;
+            }
         }
-
-        $minutes = max(0, ($endTs - $startTs) / 60.0);
-        $stageCode = $cur['STAGE_ID'];
-        if (!isset($durations[$stageCode])) {
-            $durations[$stageCode] = 0.0;
-        }
-        $durations[$stageCode] += $minutes;
+    } catch (\Throwable $e) {
     }
-
-    return $durations;
+    return false;
 }
 
-$leadIds = [
-    41660,41981,41880,41869,41801,41851,41833,41815,41901,41861,41799,41977,41900,
-    41832,41679,41680,41681,41826,41806,41841,41814,41907,41909,41864,41865,41838,
-    41920,41835,41862,41868,41817,41905,41906,41924,41866,41867,41894,42053,41736,
-    41730,41731,41575,41910,42091
+$filter = [
+    '>=DATE_CREATE' => $dateFrom,
+    '<=DATE_CREATE' => $dateTo,
+    'CHECK_PERMISSIONS' => 'N'
 ];
 
-foreach ($leadIds as $leadId) {
-    $lead = \CCrmLead::GetByID($leadId, true);
-    if (!$lead) {
-        echo $leadId . ";-\n";
-        continue;
+$res = \CCrmLead::GetListEx(['ID' => 'ASC'], $filter, false, false, ['ID']);
+$count = 0;
+$foundStatusHistory = $foundTimeline = $foundHistory = $foundEvent = $foundNone = 0;
+
+while ($lead = $res->Fetch()) {
+    $leadId = (int)$lead['ID'];
+    $source = 'none';
+    $found = 'N';
+
+    if (findInStatusHistory($leadId)) {
+        $found = 'Y';
+        $source = 'status_history';
+        $foundStatusHistory++;
+    } elseif (findInTimeline($leadId)) {
+        $found = 'Y';
+        $source = 'timeline';
+        $foundTimeline++;
+    } elseif (findInHistoryEntry($leadId)) {
+        $found = 'Y';
+        $source = 'history';
+        $foundHistory++;
+    } elseif (findInEvents($leadId)) {
+        $found = 'Y';
+        $source = 'event';
+        $foundEvent++;
+    } else {
+        $foundNone++;
     }
 
-    $timelineChanges = getTimelineStageChanges($leadId);
-    $durations = calculateDurationsFromTimeline($lead, $timelineChanges);
+    $line = $leadId . ';' . $found . ';' . $source . PHP_EOL;
+    file_put_contents($logFile, $logPrefix . $line, FILE_APPEND | LOCK_EX);
 
-    if (empty($durations)) {
-        $historyEntries = getHistoryEntriesForLead($leadId);
-        $durations = calculateDurationsFromHistory($lead, $historyEntries);
+    $count++;
+    if ($count % 500 === 0) {
+        echo "Processed {$count} leads...\n";
     }
-
-    $minutesInNew = $durations['NEW'] ?? 0.0;
-    $hoursInNew = $minutesInNew / 60.0;
-
-    echo $leadId . ";" . round($hoursInNew, 4) . "\n";
 }
+
+echo "Done. Leads: {$count}, status_history: {$foundStatusHistory}, timeline: {$foundTimeline}, history: {$foundHistory}, event: {$foundEvent}, none: {$foundNone}\n";

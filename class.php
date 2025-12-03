@@ -1,5 +1,5 @@
 ﻿<?php
-// Изменение: 2025-01-05 23:001Слоняра
+// Изменение: 2025-01-05 23:001Слоняра1
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\Application;
@@ -142,34 +142,8 @@ class AntiratingReport extends CBitrixComponent
                 return $entries;
             }
 
-            // HistoryEntry — основной источник
-            if (class_exists('\Bitrix\Crm\History\HistoryEntry')) {
-                try {
-                    $it = \Bitrix\Crm\History\HistoryEntry::getList([
-                        'filter' => [
-                            '=ENTITY_TYPE_ID' => \CCrmOwnerType::Lead,
-                            '=ENTITY_ID' => $leadId
-                        ],
-                        'order' => ['CREATED_TIME' => 'ASC'],
-                        'select' => ['ID','CREATED_TIME','STAGE_ID','STAGE_SEMANTIC_ID']
-                    ]);
-
-                    while ($row = $it->fetch()) {
-                        $stageId = $row['STAGE_ID'] ?: $row['STAGE_SEMANTIC_ID'] ?: null;
-                        if ($stageId) {
-                            $entries[] = [
-                                'STAGE_ID' => $stageId,
-                                'CREATED_TIME' => $row['CREATED_TIME']
-                            ];
-                        }
-                    }
-                } catch (\Exception $e) {
-                    // игнорируем
-                }
-            }
-
-            // fallback через CCrmEvent
-            if (empty($entries) && class_exists('CCrmEvent')) {
+            // Используем только события как резервный источник
+            if (class_exists('CCrmEvent')) {
                 try {
                     $ev = \CCrmEvent::GetList(
                         ['DATE_CREATE' => 'ASC'],
@@ -193,6 +167,28 @@ class AntiratingReport extends CBitrixComponent
             }
 
             return $entries;
+        }
+
+        protected function getStatusHistoryEntriesForLead(int $leadId): array
+        {
+            $rows = [];
+            try {
+                $conn = \Bitrix\Main\Application::getConnection();
+                $sql = "SELECT STATUS_ID, DATE_CREATE FROM b_crm_lead_status_history WHERE OWNER_ID = " . (int)$leadId . " ORDER BY DATE_CREATE ASC";
+                $res = $conn->query($sql);
+                while ($row = $res->fetch()) {
+                    if (empty($row['STATUS_ID'])) {
+                        continue;
+                    }
+                    $rows[] = [
+                        'STAGE_ID' => $row['STATUS_ID'],
+                        'CREATED_TIME' => $row['DATE_CREATE']
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // ignore errors, fallback to other sources
+            }
+            return $rows;
         }
 
         protected function getTimelineStageChanges(int $leadId): array
@@ -487,34 +483,29 @@ class AntiratingReport extends CBitrixComponent
                     }
 
                     $countedStages = [];
-                    $timelineChanges = $this->getTimelineStageChanges($leadId);
-                    $timelineDurations = $this->calculateDurationsFromTimeline($lead, $statusMap, $timelineChanges);
+                    $statusHistoryEntries = $this->getStatusHistoryEntriesForLead($leadId);
+                    $usedTimeline = false;
 
-                    if (!empty($timelineDurations)) {
-                        foreach ($timelineDurations as $stageCode => $minutes) {
-                            if (!isset($data[$managerName][$stageCode])) {
-                                $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
+                    if (!empty($statusHistoryEntries)) {
+                        $historyEntries = $statusHistoryEntries;
+                    } else {
+                        $timelineChanges = $this->getTimelineStageChanges($leadId);
+                        $timelineDurations = $this->calculateDurationsFromTimeline($lead, $statusMap, $timelineChanges);
+                        if (!empty($timelineDurations)) {
+                            $usedTimeline = true;
+                            foreach ($timelineDurations as $stageCode => $minutes) {
+                                if (!isset($data[$managerName][$stageCode])) {
+                                    $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
+                                }
+                                $data[$managerName][$stageCode]['TIME'] += $minutes;
+
+                                if (!isset($countedStages[$stageCode])) {
+                                    $data[$managerName][$stageCode]['COUNT'] += 1;
+                                    $countedStages[$stageCode] = true;
+                                }
                             }
-                            $data[$managerName][$stageCode]['TIME'] += $minutes;
 
-                            if (!isset($countedStages[$stageCode])) {
-                                $data[$managerName][$stageCode]['COUNT'] += 1;
-                                $countedStages[$stageCode] = true;
-                            }
-                        }
-
-                        $closureDuration = $this->getClosureDurationMinutes($lead, $timelineChanges);
-                        if ($closureDuration !== null) {
-                            if (!isset($closureStats[$managerName])) {
-                                $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
-                            }
-                            $closureStats[$managerName]['SUM'] += $closureDuration;
-                            $closureStats[$managerName]['COUNT'] += 1;
-                        }
-
-                        if ($closureDuration === null) {
-                            $historyEntries = $this->getHistoryEntriesForLead($leadId);
-                            $closureDuration = $this->getClosureDurationFromHistory($lead, $historyEntries);
+                            $closureDuration = $this->getClosureDurationMinutes($lead, $timelineChanges);
                             if ($closureDuration !== null) {
                                 if (!isset($closureStats[$managerName])) {
                                     $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
@@ -522,11 +513,27 @@ class AntiratingReport extends CBitrixComponent
                                 $closureStats[$managerName]['SUM'] += $closureDuration;
                                 $closureStats[$managerName]['COUNT'] += 1;
                             }
+
+                            if ($closureDuration === null) {
+                                $eventEntries = $this->getHistoryEntriesForLead($leadId);
+                                $closureDuration = $this->getClosureDurationFromHistory($lead, $eventEntries);
+                                if ($closureDuration !== null) {
+                                    if (!isset($closureStats[$managerName])) {
+                                        $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
+                                    }
+                                    $closureStats[$managerName]['SUM'] += $closureDuration;
+                                    $closureStats[$managerName]['COUNT'] += 1;
+                                }
+                            }
+                        } else {
+                            $historyEntries = $this->getHistoryEntriesForLead($leadId);
                         }
+                    }
+
+                    if ($usedTimeline) {
                         continue;
                     }
 
-                    $historyEntries = $this->getHistoryEntriesForLead($leadId);
                     if (empty($historyEntries)) {
                         continue;
                     }
