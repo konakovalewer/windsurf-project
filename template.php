@@ -10,7 +10,132 @@ $leadScoreTotals = $arResult['leadScoreTotals'] ?? [];
 $generatedAt = $arResult['generatedAt'] ?? '';
 $controlSum = $arResult['controlSum'] ?? null;
 $executionSeconds = $arResult['executionSeconds'] ?? null;
+
+\Bitrix\Main\UI\Extension::load('ui.entity-selector');
 ?>
+
+<style>
+    .ar-settings {
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        margin-bottom: 16px;
+        background: #fafafa;
+    }
+    .ar-settings__header {
+        padding: 10px 12px;
+        cursor: pointer;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .ar-settings__content {
+        display: none;
+        padding: 12px;
+        border-top: 1px solid #e0e0e0;
+    }
+    .ar-settings__block {
+        margin-bottom: 16px;
+    }
+    .ar-settings__block h4 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+    }
+    .ar-settings__row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .ar-settings__list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+    }
+    .ar-pill {
+        background: #eef3ff;
+        border: 1px solid #c6d4ff;
+        border-radius: 12px;
+        padding: 4px 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+    }
+    .ar-pill button {
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        color: #888;
+        font-size: 12px;
+        line-height: 1;
+    }
+    .ar-input {
+        padding: 6px 8px;
+        border: 1px solid #dfe3e8;
+        border-radius: 4px;
+        min-width: 80px;
+    }
+    .ar-button {
+        padding: 6px 10px;
+        border: 1px solid #2f7be5;
+        background: #2f7be5;
+        color: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .ar-muted {
+        color: #888;
+        font-size: 12px;
+    }
+    .ar-section-title {
+        font-weight: 700;
+        margin: 0;
+        font-size: 15px;
+    }
+    .ar-flex {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+</style>
+
+<div class="ar-settings" id="ar-settings">
+    <div class="ar-settings__header" onclick="(function(box){ box.style.display = box.style.display === 'block' ? 'none' : 'block';})(document.getElementById('ar-settings-box'));">
+        <span class="ar-section-title">Настройки (для администраторов)</span>
+        <span class="ar-muted">кликните, чтобы раскрыть</span>
+    </div>
+    <div class="ar-settings__content" id="ar-settings-box">
+        <div class="ar-settings__block">
+            <h4>Настройка нормативов по этапам</h4>
+            <div class="ar-settings__row">
+                <label>NEW:</label>
+                <input type="number" class="ar-input" data-setting-key="norm_new" value="1" min="0" step="0.1">
+            </div>
+            <div class="ar-settings__row">
+                <label>Остальные этапы:</label>
+                <input type="number" class="ar-input" data-setting-key="norm_other" value="5" min="0" step="0.1">
+            </div>
+            <div class="ar-muted">Пока эти поля не связаны с расчётами (только визуальный макет).</div>
+        </div>
+        <div class="ar-settings__block">
+            <h4>Пользователи</h4>
+            <div class="ar-flex" style="margin-bottom:8px;">
+                <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
+                <button type="button" class="ar-button" onclick="arAddUser()">Добавить</button>
+            </div>
+            <div class="ar-muted">Используйте поиск и добавьте в список. Сейчас это демонстрация, без связи с отчётом.</div>
+            <div style="margin-top:10px; font-weight:600;">Пользователи, по которым выводится отчёт:</div>
+            <div class="ar-settings__list" id="ar-user-list"></div>
+        </div>
+        <div class="ar-settings__block" style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="ar-button" onclick="arApplySettings()">Применить</button>
+            <button type="button" class="ar-button" style="background:#ccc; border-color:#ccc; color:#000;" onclick="arCancelSettings()">Отмена</button>
+            <div class="ar-muted">Пока сохраняет только в памяти страницы.</div>
+        </div>
+    </div>
+</div>
 
 <form method="get" name="antirating-filter" style="margin-bottom:16px; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
     <div>
@@ -159,3 +284,106 @@ $executionSeconds = $arResult['executionSeconds'] ?? null;
         <?php endforeach; ?>
     </tbody>
 </table>
+
+<script>
+BX.ready(function() {
+    // Для хранения исходных значений настроек
+    var arInitialSettings = {
+        norms: {},
+        users: []
+    };
+
+    function arCaptureInitial() {
+        var normNew = document.querySelector('[data-setting-key="norm_new"]');
+        var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        arInitialSettings.norms = {
+            norm_new: normNew ? normNew.value : '',
+            norm_other: normOther ? normOther.value : ''
+        };
+        arInitialSettings.users = [];
+        var list = document.getElementById('ar-user-list');
+        if (list) {
+            list.querySelectorAll('.ar-pill').forEach(function(pill) {
+                arInitialSettings.users.push(pill.dataset.user || pill.textContent);
+            });
+        }
+    }
+    arCaptureInitial();
+
+    window.arAddUser = function() {
+        var input = document.getElementById('ar-user-input');
+        if (!input) return;
+        var val = (input.value || '').trim();
+        if (!val) return;
+        var list = document.getElementById('ar-user-list');
+        if (!list) return;
+        var pill = document.createElement('div');
+        pill.className = 'ar-pill';
+        pill.textContent = val;
+        pill.dataset.user = val;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'x';
+        btn.onclick = function(){ pill.remove(); };
+        pill.appendChild(btn);
+        list.appendChild(pill);
+        input.value = '';
+    };
+
+    window.arOpenUserSelector = function() {
+        var dialog = new BX.UI.EntitySelector.Dialog({
+            targetNode: document.getElementById('ar-user-input'),
+            enableSearch: true,
+            multiple: false,
+            width: 420,
+            entities: [{ id: 'user' }],
+            events: {
+                'Item:onSelect': function(event) {
+                    var item = event.getData().item;
+                    if (!item) return;
+                    var label = item.getTitle() + ' (' + item.getId() + ')';
+                    var input = document.getElementById('ar-user-input');
+                    if (input) {
+                        input.value = label;
+                    }
+                }
+            }
+        });
+        dialog.show();
+    };
+
+    window.arApplySettings = function() {
+        arCaptureInitial();
+        if (BX && BX.UI && BX.UI.Notification && BX.UI.Notification.Center) {
+            BX.UI.Notification.Center.notify({
+                content: 'Сохранено',
+                autoHideDelay: 800
+            });
+        }
+    };
+
+    window.arCancelSettings = function() {
+        var normNew = document.querySelector('[data-setting-key="norm_new"]');
+        var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        if (normNew) normNew.value = arInitialSettings.norms.norm_new || '';
+        if (normOther) normOther.value = arInitialSettings.norms.norm_other || '';
+
+        var list = document.getElementById('ar-user-list');
+        if (list) {
+            list.innerHTML = '';
+            (arInitialSettings.users || []).forEach(function(val) {
+                var pill = document.createElement('div');
+                pill.className = 'ar-pill';
+                pill.textContent = val;
+                pill.dataset.user = val;
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = 'x';
+                btn.onclick = function(){ pill.remove(); };
+                pill.appendChild(btn);
+                list.appendChild(pill);
+            });
+        }
+    };
+});
+</script>
