@@ -160,6 +160,15 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
 <?php endif; ?>
 
 <h3>Лиды</h3>
+<?php
+$leadManagers = array_keys($arResult['data'] ?? []);
+usort($leadManagers, function($a, $b) use ($leadScoreTotals) {
+    $sa = $leadScoreTotals[$a] ?? 0;
+    $sb = $leadScoreTotals[$b] ?? 0;
+    if ($sa == $sb) return 0;
+    return ($sa > $sb) ? -1 : 1;
+});
+?>
 <table class="ar-table">
     <thead>
         <tr>
@@ -182,17 +191,28 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
         </tr>
     </thead>
     <tbody>
-        <?php foreach (($arResult['data'] ?? []) as $managerName => $stagesData): ?>
-            <tr>
+        <?php foreach ($leadManagers as $managerName): ?>
+            <?php $stagesData = $arResult['data'][$managerName] ?? []; ?>
+            <?php
+                $totalScore = $leadScoreTotals[$managerName] ?? 0;
+                $rowStyle = '';
+                if ($totalScore > 0) {
+                    $rowStyle = 'background:#ffecec;';
+                } elseif ($totalScore === 0 || $totalScore === null) {
+                    $rowStyle = 'background:#ecffec;';
+                }
+            ?>
+            <tr style="<?= $rowStyle ?>">
                 <td><?= htmlspecialchars($managerName) ?></td>
                 <td style="text-align:center;"><?= (int)($leadTotals[$managerName] ?? 0) ?></td>
-                <td style="text-align:center;"><?= (int)($leadScoreTotals[$managerName] ?? 0) ?></td>
+                <td style="text-align:center;"><?= $totalScore !== null ? (int)$totalScore : '-' ?></td>
                 <td style="text-align:right; padding-right:8px;">
                     <?php
                     $closure = $arResult['closureStats'][$managerName] ?? null;
                     if ($closure && ($closure['COUNT'] ?? 0) > 0) {
                         $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
-                        echo round($avgDays, 2);
+                        $val = round($avgDays, 2);
+                        echo ($val != 0.0) ? $val : '-';
                     } else {
                         echo '-';
                     }
@@ -210,8 +230,8 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
                     $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
                     ?>
-                    <td style="text-align:center;"><?= $countVal ?></td>
-                    <td style="text-align:right; padding-right:8px;"><?= $avgDaysStage !== null ? round($avgDaysStage, 2) : '-' ?></td>
+                    <td style="text-align:center;"><?= $countVal !== 0 ? $countVal : '-' ?></td>
+                    <td style="text-align:right; padding-right:8px;"><?= $avgDaysStage !== null && $avgDaysStage != 0.0 ? round($avgDaysStage, 2) : '-' ?></td>
                     <td style="text-align:center;">
                         <?php
                         $scoreStage = $scores[$stageCode][$managerName] ?? null;
@@ -244,7 +264,16 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
 <?php endif; ?>
 
 <h3 style="margin-top:32px;">Контакты</h3>
-<table class="ar-table" style="margin-top:8px;">
+<?php
+$contactRows = $arResult['contactsData'] ?? [];
+uksort($contactRows, function($a, $b) use ($arResult) {
+    $sa = $arResult['contactsScores'][$a] ?? 0;
+    $sb = $arResult['contactsScores'][$b] ?? 0;
+    if ($sa == $sb) return 0;
+    return ($sa > $sb) ? -1 : 1;
+});
+?>
+<table class="ar-table" style="margin-top:8px; width:auto; min-width:60%;">
     <thead>
         <tr>
             <th>Ответственный</th>
@@ -255,20 +284,28 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
         </tr>
     </thead>
     <tbody>
-        <?php foreach (($arResult['contactsData'] ?? []) as $managerName => $cData): ?>
-            <tr>
+        <?php foreach ($contactRows as $managerName => $cData): ?>
+            <?php
+                $score = $arResult['contactsScores'][$managerName] ?? null;
+                $rowStyle = '';
+                if ($score > 0) {
+                    $rowStyle = 'background:#ffecec;';
+                } elseif ($score === 0 || $score === null) {
+                    $rowStyle = 'background:#ecffec;';
+                }
+            ?>
+            <tr style="<?= $rowStyle ?>">
                 <td><?= htmlspecialchars($managerName) ?></td>
-                <td style="text-align:center;"><?= (int)($cData['TOTAL'] ?? 0) ?></td>
-                <td style="text-align:center;"><?= (int)($cData['INCOMPLETE'] ?? 0) ?></td>
+                <td style="text-align:center;"><?= ($cData['TOTAL'] ?? 0) ? (int)$cData['TOTAL'] : '-' ?></td>
+                <td style="text-align:center;"><?= ($cData['INCOMPLETE'] ?? 0) ? (int)$cData['INCOMPLETE'] : '-' ?></td>
                 <td style="text-align:right; padding-right:8px;">
                     <?php
                     $percent = $cData['PERCENT'] ?? null;
-                    echo $percent !== null ? round($percent, 2) : '-';
+                    echo ($percent !== null && $percent != 0.0) ? round($percent, 2) : '-';
                     ?>
                 </td>
                 <td style="text-align:center;">
                     <?php
-                    $score = $arResult['contactsScores'][$managerName] ?? null;
                     echo $score !== null ? (int)$score : '-';
                     ?>
                 </td>
