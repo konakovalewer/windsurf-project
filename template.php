@@ -1,5 +1,4 @@
 <?php if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) die(); ?>
-
 <?php
 global $APPLICATION;
 $dateFrom = htmlspecialcharsbx($arResult['filterValues']['DATE_FROM'] ?? '');
@@ -10,95 +9,31 @@ $leadScoreTotals = $arResult['leadScoreTotals'] ?? [];
 $generatedAt = $arResult['generatedAt'] ?? '';
 $controlSum = $arResult['controlSum'] ?? null;
 $executionSeconds = $arResult['executionSeconds'] ?? null;
+$settings = $arResult['settings'] ?? [];
+$normNewVal = htmlspecialcharsbx((string)($settings['norm_new'] ?? '1'));
+$normOtherVal = htmlspecialcharsbx((string)($settings['norm_other'] ?? '5'));
+$usersList = $settings['users'] ?? [];
+$userNames = $settings['user_names'] ?? [];
+$cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, каталоги /custom/antirating/leads и /custom/antirating/contacts');
 
 \Bitrix\Main\UI\Extension::load('ui.entity-selector');
 ?>
 
 <style>
-    .ar-settings {
-        border: 1px solid #e0e0e0;
-        border-radius: 4px;
-        margin-bottom: 16px;
-        background: #fafafa;
-    }
-    .ar-settings__header {
-        padding: 10px 12px;
-        cursor: pointer;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }
-    .ar-settings__content {
-        display: none;
-        padding: 12px;
-        border-top: 1px solid #e0e0e0;
-    }
-    .ar-settings__block {
-        margin-bottom: 16px;
-    }
-    .ar-settings__block h4 {
-        margin: 0 0 8px 0;
-        font-size: 14px;
-    }
-    .ar-settings__row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        margin-bottom: 8px;
-    }
-    .ar-settings__list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-top: 8px;
-    }
-    .ar-pill {
-        background: #eef3ff;
-        border: 1px solid #c6d4ff;
-        border-radius: 12px;
-        padding: 4px 8px;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-    }
-    .ar-pill button {
-        border: none;
-        background: transparent;
-        cursor: pointer;
-        color: #888;
-        font-size: 12px;
-        line-height: 1;
-    }
-    .ar-input {
-        padding: 6px 8px;
-        border: 1px solid #dfe3e8;
-        border-radius: 4px;
-        min-width: 80px;
-    }
-    .ar-button {
-        padding: 6px 10px;
-        border: 1px solid #2f7be5;
-        background: #2f7be5;
-        color: #fff;
-        border-radius: 4px;
-        cursor: pointer;
-    }
-    .ar-muted {
-        color: #888;
-        font-size: 12px;
-    }
-    .ar-section-title {
-        font-weight: 700;
-        margin: 0;
-        font-size: 15px;
-    }
-    .ar-flex {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-    }
+    .ar-settings { border:1px solid #e0e0e0; border-radius:4px; margin-bottom:16px; background:#fafafa; }
+    .ar-settings__header { padding:10px 12px; cursor:pointer; font-weight:600; display:flex; align-items:center; justify-content:space-between; }
+    .ar-settings__content { display:none; padding:12px; border-top:1px solid #e0e0e0; }
+    .ar-settings__block { margin-bottom:16px; }
+    .ar-settings__block h4 { margin:0 0 8px 0; font-size:14px; }
+    .ar-settings__row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    .ar-settings__list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+    .ar-pill { background:#eef3ff; border:1px solid #c6d4ff; border-radius:12px; padding:4px 8px; display:inline-flex; align-items:center; gap:6px; font-size:12px; }
+    .ar-pill button { border:none; background:transparent; cursor:pointer; color:#888; font-size:12px; line-height:1; }
+    .ar-input { padding:6px 8px; border:1px solid #dfe3e8; border-radius:4px; min-width:80px; }
+    .ar-button { padding:6px 10px; border:1px solid #2f7be5; background:#2f7be5; color:#fff; border-radius:4px; cursor:pointer; }
+    .ar-muted { color:#888; font-size:12px; }
+    .ar-section-title { font-weight:700; margin:0; font-size:15px; }
+    .ar-flex { display:flex; gap:8px; align-items:center; }
 </style>
 
 <div class="ar-settings" id="ar-settings">
@@ -111,13 +46,12 @@ $executionSeconds = $arResult['executionSeconds'] ?? null;
             <h4>Настройка нормативов по этапам</h4>
             <div class="ar-settings__row">
                 <label>NEW:</label>
-                <input type="number" class="ar-input" data-setting-key="norm_new" value="1" min="0" step="0.1">
+                <input type="number" class="ar-input" data-setting-key="norm_new" value="<?= $normNewVal ?>" min="0" step="0.1">
             </div>
             <div class="ar-settings__row">
                 <label>Остальные этапы:</label>
-                <input type="number" class="ar-input" data-setting-key="norm_other" value="5" min="0" step="0.1">
+                <input type="number" class="ar-input" data-setting-key="norm_other" value="<?= $normOtherVal ?>" min="0" step="0.1">
             </div>
-            <div class="ar-muted">Пока эти поля не связаны с расчётами (только визуальный макет).</div>
         </div>
         <div class="ar-settings__block">
             <h4>Пользователи</h4>
@@ -125,19 +59,31 @@ $executionSeconds = $arResult['executionSeconds'] ?? null;
                 <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
                 <button type="button" class="ar-button" onclick="arAddUser()">Добавить</button>
             </div>
-            <div class="ar-muted">Используйте поиск и добавьте в список. Сейчас это демонстрация, без связи с отчётом.</div>
             <div style="margin-top:10px; font-weight:600;">Пользователи, по которым выводится отчёт:</div>
-            <div class="ar-settings__list" id="ar-user-list"></div>
+            <div class="ar-settings__list" id="ar-user-list">
+                <?php foreach ($usersList as $uId): ?>
+                    <?php $label = trim($userNames[$uId] ?? (string)$uId); ?>
+                    <div class="ar-pill" data-user="<?= (int)$uId ?>" data-label="<?= htmlspecialcharsbx($label) ?>">
+                        <?= htmlspecialcharsbx($label) ?>
+                        <button type="button" onclick="this.parentNode.remove()">x</button>
+                    </div>
+                <?php endforeach; ?>
+            </div>
         </div>
         <div class="ar-settings__block" style="display:flex; gap:8px; align-items:center;">
             <button type="button" class="ar-button" onclick="arApplySettings()">Применить</button>
             <button type="button" class="ar-button" style="background:#ccc; border-color:#ccc; color:#000;" onclick="arCancelSettings()">Отмена</button>
-            <div class="ar-muted">Пока сохраняет только в памяти страницы.</div>
+        </div>
+        <div class="ar-muted" style="padding:4px 0 0 0;">
+            <?= $cacheInfo ?>
         </div>
     </div>
 </div>
 
 <form method="get" name="antirating-filter" style="margin-bottom:16px; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
+    <input type="hidden" name="SETTINGS_NORM_NEW" id="settings-norm-new" value="<?= $normNewVal ?>">
+    <input type="hidden" name="SETTINGS_NORM_OTHER" id="settings-norm-other" value="<?= $normOtherVal ?>">
+    <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
     <div>
         <label style="display:block; margin-bottom:4px;">Дата создания от</label>
         <?php
@@ -162,7 +108,6 @@ $executionSeconds = $arResult['executionSeconds'] ?? null;
         ], false);
         ?>
     </div>
-    <input type="hidden" name="MANAGER_ID" value="<?= intval($arResult['managerId'] ?? 0) ?>">
     <div>
         <button type="submit" class="ui-btn ui-btn-primary">Показать</button>
         <a href="<?= strtok($APPLICATION->GetCurPageParam('', []), '?') ?>" class="ui-btn ui-btn-link">Сбросить</a>
@@ -236,7 +181,7 @@ $executionSeconds = $arResult['executionSeconds'] ?? null;
 </table>
 
 <?php if (empty($arResult['data'])): ?>
-    <p style="color:#666;">Данные не найдены (менеджер ID <?= intval($arResult['managerId'] ?? 0) ?>). Проверьте MANAGER_ID или наличие истории стадий у лидов.</p>
+    <p style="color:#666;">Данные не найдены. Проверьте фильтр и выбранных пользователей.</p>
 <?php endif; ?>
 
 <div style="margin-top:12px;">
@@ -287,7 +232,6 @@ $executionSeconds = $arResult['executionSeconds'] ?? null;
 
 <script>
 BX.ready(function() {
-    // Для хранения исходных значений настроек
     var arInitialSettings = {
         norms: {},
         users: []
@@ -304,23 +248,48 @@ BX.ready(function() {
         var list = document.getElementById('ar-user-list');
         if (list) {
             list.querySelectorAll('.ar-pill').forEach(function(pill) {
-                arInitialSettings.users.push(pill.dataset.user || pill.textContent);
+                arInitialSettings.users.push({
+                    id: pill.dataset.user || '',
+                    label: pill.dataset.label || pill.textContent
+                });
             });
         }
     }
+
+    function arRenderUsers(users) {
+        var list = document.getElementById('ar-user-list');
+        if (!list) return;
+        list.innerHTML = '';
+        (users || []).forEach(function(item) {
+            var pill = document.createElement('div');
+            pill.className = 'ar-pill';
+            pill.dataset.user = item.id;
+            pill.dataset.label = item.label;
+            pill.textContent = item.label;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'x';
+            btn.onclick = function(){ pill.remove(); };
+            pill.appendChild(btn);
+            list.appendChild(pill);
+        });
+    }
+
     arCaptureInitial();
 
     window.arAddUser = function() {
         var input = document.getElementById('ar-user-input');
         if (!input) return;
         var val = (input.value || '').trim();
+        var id = input.dataset.userId ? input.dataset.userId.trim() : '';
         if (!val) return;
         var list = document.getElementById('ar-user-list');
         if (!list) return;
         var pill = document.createElement('div');
         pill.className = 'ar-pill';
+        pill.dataset.user = id || val;
+        pill.dataset.label = val;
         pill.textContent = val;
-        pill.dataset.user = val;
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = 'x';
@@ -328,6 +297,7 @@ BX.ready(function() {
         pill.appendChild(btn);
         list.appendChild(pill);
         input.value = '';
+        input.dataset.userId = '';
     };
 
     window.arOpenUserSelector = function() {
@@ -345,6 +315,7 @@ BX.ready(function() {
                     var input = document.getElementById('ar-user-input');
                     if (input) {
                         input.value = label;
+                        input.dataset.userId = item.getId();
                     }
                 }
             }
@@ -352,8 +323,34 @@ BX.ready(function() {
         dialog.show();
     };
 
+    function arUpdateHidden() {
+        var normNew = document.querySelector('[data-setting-key="norm_new"]');
+        var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        var inputNormNew = document.getElementById('settings-norm-new');
+        var inputNormOther = document.getElementById('settings-norm-other');
+        if (inputNormNew && normNew) inputNormNew.value = normNew.value;
+        if (inputNormOther && normOther) inputNormOther.value = normOther.value;
+
+        var list = document.getElementById('ar-user-list');
+        var ids = [];
+        if (list) {
+            list.querySelectorAll('.ar-pill').forEach(function(pill) {
+                if (pill.dataset.user) {
+                    ids.push(pill.dataset.user);
+                } else {
+                    ids.push(pill.textContent.trim());
+                }
+            });
+        }
+        var inputUsers = document.getElementById('settings-users');
+        if (inputUsers) {
+            inputUsers.value = ids.join(',');
+        }
+    }
+
     window.arApplySettings = function() {
         arCaptureInitial();
+        arUpdateHidden();
         if (BX && BX.UI && BX.UI.Notification && BX.UI.Notification.Center) {
             BX.UI.Notification.Center.notify({
                 content: 'Сохранено',
@@ -367,23 +364,8 @@ BX.ready(function() {
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
         if (normNew) normNew.value = arInitialSettings.norms.norm_new || '';
         if (normOther) normOther.value = arInitialSettings.norms.norm_other || '';
-
-        var list = document.getElementById('ar-user-list');
-        if (list) {
-            list.innerHTML = '';
-            (arInitialSettings.users || []).forEach(function(val) {
-                var pill = document.createElement('div');
-                pill.className = 'ar-pill';
-                pill.textContent = val;
-                pill.dataset.user = val;
-                var btn = document.createElement('button');
-                btn.type = 'button';
-                btn.textContent = 'x';
-                btn.onclick = function(){ pill.remove(); };
-                pill.appendChild(btn);
-                list.appendChild(pill);
-            });
-        }
+        arRenderUsers(arInitialSettings.users);
+        arUpdateHidden();
     };
 });
 </script>

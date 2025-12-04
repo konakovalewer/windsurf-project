@@ -1,5 +1,5 @@
 ﻿<?php
-// РР·РјРµРЅРµРЅРёРµ: 2025-01-05 23:001РЎР»РѕРЅСЏСЂР°1
+// Р ВР В·Р СР ВµР Р…Р ВµР Р…Р С‘Р Вµ: 2025-01-05 23:001Р РЋР В»Р С•Р Р…РЎРЏРЎР‚Р В°1
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\Application;
@@ -20,7 +20,7 @@ class AntiratingReport extends CBitrixComponent
             if (!empty($allowedStages) && !in_array($code, $allowedStages, true)) {
                 continue;
             }
-            // Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РѕС‚СЃРµС‡С‘Рј СѓСЃРїРµС…/РїСЂРѕРІР°Р» РїРѕ СЃРµРјР°РЅС‚РёРєРµ
+            // Р вЂќР С•Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР ВµР В»РЎРЉР Р…Р С• Р С•РЎвЂљРЎРѓР ВµРЎвЂЎРЎвЂР С РЎС“РЎРѓР С—Р ВµРЎвЂ¦/Р С—РЎР‚Р С•Р Р†Р В°Р В» Р С—Р С• РЎРѓР ВµР СР В°Р Р…РЎвЂљР С‘Р С”Р Вµ
             $semantic = $this->getStageSemantic($code);
             if ($semantic === null || $semantic === '') {
                 $semantic = \CCrmLead::GetSemanticID($code);
@@ -92,7 +92,7 @@ class AntiratingReport extends CBitrixComponent
             return PhaseSemantics::isFinal($semanticUpper);
         }
 
-        // Fallback: detect typical С„РёРЅР°Р»СЊРЅС‹Рµ РєРѕРґС‹, РґР°Р¶Рµ РµСЃР»Рё РІ СЃС‚Р°С‚СѓСЃРµ РЅРµС‚ СЃРµРјР°РЅС‚РёРєРё
+        // Fallback: detect typical РЎвЂћР С‘Р Р…Р В°Р В»РЎРЉР Р…РЎвЂ№Р Вµ Р С”Р С•Р Т‘РЎвЂ№, Р Т‘Р В°Р В¶Р Вµ Р ВµРЎРѓР В»Р С‘ Р Р† РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓР Вµ Р Р…Р ВµРЎвЂљ РЎРѓР ВµР СР В°Р Р…РЎвЂљР С‘Р С”Р С‘
         $plainCode = strtoupper(strpos($stageCode, ':') !== false ? substr($stageCode, strrpos($stageCode, ':') + 1) : $stageCode);
         $finalCodes = ['CONVERTED', 'JUNK', 'WON', 'LOST', 'LOSE', 'FAILED', 'S', 'F'];
         return in_array($plainCode, $finalCodes, true);
@@ -159,7 +159,7 @@ protected function getHistoryEntriesForLead($leadId)
                 return $entries;
             }
 
-            // РСЃРїРѕР»СЊР·СѓРµРј С‚РѕР»СЊРєРѕ СЃРѕР±С‹С‚РёСЏ РєР°Рє СЂРµР·РµСЂРІРЅС‹Р№ РёСЃС‚РѕС‡РЅРёРє
+            // Р ВРЎРѓР С—Р С•Р В»РЎРЉР В·РЎС“Р ВµР С РЎвЂљР С•Р В»РЎРЉР С”Р С• РЎРѓР С•Р В±РЎвЂ№РЎвЂљР С‘РЎРЏ Р С”Р В°Р С” РЎР‚Р ВµР В·Р ВµРЎР‚Р Р†Р Р…РЎвЂ№Р в„– Р С‘РЎРѓРЎвЂљР С•РЎвЂЎР Р…Р С‘Р С”
             if (class_exists('CCrmEvent')) {
                 try {
                     $ev = \CCrmEvent::GetList(
@@ -179,7 +179,7 @@ protected function getHistoryEntriesForLead($leadId)
                         }
                     }
                 } catch (\Exception $e) {
-                    // РёРіРЅРѕСЂРёСЂСѓРµРј
+                    // Р С‘Р С–Р Р…Р С•РЎР‚Р С‘РЎР‚РЎС“Р ВµР С
                 }
             }
 
@@ -750,26 +750,29 @@ protected function getHistoryEntriesForLead($leadId)
             $leadService = new LeadReportService($converter);
             $contactService = new ContactReportService();
 
-            $allowedManagers = [157, 12, 39, 67, 130, 290, 2681];
-
             $request = Application::getInstance()->getContext()->getRequest();
-            $managerIdRaw = $request->get('MANAGER_ID');
-            $requestedManagerId = (int)$managerIdRaw;
-            $managerFilterApplied = ($request->get('FILTER_MANAGER') === 'Y' && in_array($requestedManagerId, $allowedManagers, true));
-
-            $managersToProcess = $managerFilterApplied ? [$requestedManagerId] : $allowedManagers;
-            $managerId = $managerFilterApplied ? $requestedManagerId : 0;
+            $usersRaw = $request->get('SETTINGS_USERS') ?? '';
+            $managersToProcess = [];
+            foreach (explode(',', (string)$usersRaw) as $uId) {
+                $uId = (int)trim($uId);
+                if ($uId > 0) {
+                    $managersToProcess[] = $uId;
+                }
+            }
+            $managerId = 0;
 
             $statusMap = $this->getAllStatusesMap();
             $allStages = array_keys($statusMap);
 
             $managerNameMap = [];
-            $usersRes = \Bitrix\Main\UserTable::getList([
-                'select' => ['ID','NAME','LAST_NAME'],
-                'filter' => ['@ID' => $allowedManagers]
-            ]);
-            while ($u = $usersRes->fetch()) {
-                $managerNameMap[(int)$u['ID']] = trim(($u['NAME'] ?? '') . ' ' . ($u['LAST_NAME'] ?? ''));
+            if (!empty($managersToProcess)) {
+                $usersRes = \Bitrix\Main\UserTable::getList([
+                    'select' => ['ID','NAME','LAST_NAME'],
+                    'filter' => ['@ID' => $managersToProcess]
+                ]);
+                while ($u = $usersRes->fetch()) {
+                    $managerNameMap[(int)$u['ID']] = trim(($u['NAME'] ?? '') . ' ' . ($u['LAST_NAME'] ?? ''));
+                }
             }
 
             $dateFromRaw = $request->get('DATE_FROM') ?? ($this->arParams['DATE_FROM'] ?? null);
@@ -777,7 +780,10 @@ protected function getHistoryEntriesForLead($leadId)
             $dateFrom = $this->parseDateParam($dateFromRaw);
             $dateTo = $this->parseDateParam($dateToRaw);
 
-            $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages);
+            $normNew = (float)($request->get('SETTINGS_NORM_NEW') !== null ? $request->get('SETTINGS_NORM_NEW') : 1);
+            $normOther = (float)($request->get('SETTINGS_NORM_OTHER') !== null ? $request->get('SETTINGS_NORM_OTHER') : 5);
+
+            $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages, $normNew, $normOther);
             $data = $leadsReport['data'];
             $closureStats = $leadsReport['closureStats'];
             $scores = $leadsReport['scores'];
@@ -803,23 +809,19 @@ protected function getHistoryEntriesForLead($leadId)
                 'DATE_TO' => $dateToRaw
             ];
             $this->arResult['generatedAt'] = date('c');
+            $this->arResult['settings'] = [
+                'norm_new' => $normNew,
+                'norm_other' => $normOther,
+                'users' => $managersToProcess,
+                'user_names' => $managerNameMap,
+                'cache_info' => 'РљРµС€: 300 СЃРµРєСѓРЅРґ; РєР°С‚Р°Р»РѕРіРё /custom/antirating/leads Рё /custom/antirating/contacts'
+            ];
 
             $this->arResult['controlSum'] = $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages);
             $this->arResult['executionSeconds'] = microtime(true) - $startTime;
 
             $this->includeComponentTemplate();
         }
-protected function logMessage(string $text): void
-        {
-            $logFile = __DIR__ . '/log0212.php';
-            $prefix = '[' . date('c') . '] ';
-            try {
-                file_put_contents($logFile, $prefix . $text . PHP_EOL, FILE_APPEND | LOCK_EX);
-            } catch (\Throwable $e) {
-                // С‚РёС…Рѕ РёРіРЅРѕСЂРёСЂСѓРµРј, С‡С‚РѕР±С‹ РЅРµ Р»РѕРјР°С‚СЊ РѕС‚С‡С‘С‚
-            }
-        }
-
         protected function calculateScoresByNorm(array $averageDaysByManager, float $normativeDays): array
         {
             $rows = [];
@@ -863,4 +865,3 @@ protected function logMessage(string $text): void
         }
     }
 // refactoring marker
-

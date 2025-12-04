@@ -335,7 +335,7 @@ class LeadReportService
         return $scores;
     }
 
-    public function buildLeadsReport(array $managersToProcess, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, array $allStages): array
+    public function buildLeadsReport(array $managersToProcess, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, array $allStages, float $normNew, float $normOther): array
     {
         $data = [];
         foreach ($managersToProcess as $managerIdItem) {
@@ -466,9 +466,9 @@ class LeadReportService
             }
         }
 
-        $defaultNormDays = 5.0;
+        $defaultNormDays = $normOther;
         $normativeDaysByStage = [
-            'NEW' => 1.0
+            'NEW' => $normNew
         ];
 
         $stageAverages = [];
