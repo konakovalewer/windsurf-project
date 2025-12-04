@@ -108,6 +108,7 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; 
     <input type="hidden" name="SETTINGS_NORM_NEW" id="settings-norm-new" value="<?= $normNewVal ?>">
     <input type="hidden" name="SETTINGS_NORM_OTHER" id="settings-norm-other" value="<?= $normOtherVal ?>">
     <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
+    <input type="hidden" name="SAVE_SETTINGS" id="save-settings" value="">
     <div>
         <label style="display:block; margin-bottom:4px;">Дата создания от</label>
         <?php
@@ -370,6 +371,13 @@ BX.ready(function() {
     window.arApplySettings = function() {
         arCaptureInitial();
         arUpdateHidden();
+        var saveInput = document.getElementById('save-settings');
+        if (saveInput) saveInput.value = 'Y';
+        var form = document.forms['antirating-filter'];
+        if (form) {
+            form.submit();
+            return;
+        }
         if (BX && BX.UI && BX.UI.Notification && BX.UI.Notification.Center) {
             BX.UI.Notification.Center.notify({
                 content: 'Сохранено',
@@ -385,6 +393,8 @@ BX.ready(function() {
         if (normOther) normOther.value = arInitialSettings.norms.norm_other || '';
         arRenderUsers(arInitialSettings.users);
         arUpdateHidden();
+        var saveInput = document.getElementById('save-settings');
+        if (saveInput) saveInput.value = '';
     };
 });
 </script>

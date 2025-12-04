@@ -4,6 +4,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\Application;
 use Bitrix\Main\Data\Cache;
+use Bitrix\Main\Config\Option;
 use Bitrix\Crm\PhaseSemantics;
 
 if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) die();
@@ -751,6 +752,20 @@ protected function getHistoryEntriesForLead($leadId)
             $contactService = new ContactReportService();
 
             $request = Application::getInstance()->getContext()->getRequest();
+            global $USER;
+
+            $savedSettings = [];
+            $savedJson = Option::get('main', 'custom_antirating_settings', '');
+            if ($savedJson !== '') {
+                try {
+                    $decoded = Json::decode($savedJson);
+                    if (is_array($decoded)) {
+                        $savedSettings = $decoded;
+                    }
+                } catch (\Throwable $e) {
+                }
+            }
+
             $usersRaw = $request->get('SETTINGS_USERS') ?? '';
             $managersToProcess = [];
             foreach (explode(',', (string)$usersRaw) as $uId) {
@@ -758,6 +773,9 @@ protected function getHistoryEntriesForLead($leadId)
                 if ($uId > 0) {
                     $managersToProcess[] = $uId;
                 }
+            }
+            if (empty($managersToProcess) && !empty($savedSettings['users']) && is_array($savedSettings['users'])) {
+                $managersToProcess = array_map('intval', $savedSettings['users']);
             }
             $managerId = 0;
 
@@ -780,8 +798,25 @@ protected function getHistoryEntriesForLead($leadId)
             $dateFrom = $this->parseDateParam($dateFromRaw);
             $dateTo = $this->parseDateParam($dateToRaw);
 
-            $normNew = (float)($request->get('SETTINGS_NORM_NEW') !== null ? $request->get('SETTINGS_NORM_NEW') : 1);
-            $normOther = (float)($request->get('SETTINGS_NORM_OTHER') !== null ? $request->get('SETTINGS_NORM_OTHER') : 5);
+            $normNew = $request->get('SETTINGS_NORM_NEW') !== null
+                ? (float)$request->get('SETTINGS_NORM_NEW')
+                : (float)($savedSettings['norm_new'] ?? 1);
+            $normOther = $request->get('SETTINGS_NORM_OTHER') !== null
+                ? (float)$request->get('SETTINGS_NORM_OTHER')
+                : (float)($savedSettings['norm_other'] ?? 5);
+
+            $saveFlag = $request->get('SAVE_SETTINGS');
+            if ($saveFlag === 'Y' && is_object($USER) && $USER->IsAdmin()) {
+                $toStore = [
+                    'norm_new' => $normNew,
+                    'norm_other' => $normOther,
+                    'users' => $managersToProcess,
+                ];
+                try {
+                    Option::set('main', 'custom_antirating_settings', Json::encode($toStore));
+                } catch (\Throwable $e) {
+                }
+            }
 
             $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages, $normNew, $normOther);
             $data = $leadsReport['data'];
