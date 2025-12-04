@@ -794,6 +794,12 @@ protected function getHistoryEntriesForLead($leadId)
             $contactsData = $contactsReport['contactsData'];
             $contactsScores = $contactsReport['contactsScores'];
 
+            $readmeText = '';
+            $readmePath = __DIR__ . '/READ ME.txt';
+            if (file_exists($readmePath)) {
+                $readmeText = (string)file_get_contents($readmePath);
+            }
+
             $this->arResult['stages'] = $allStages;
             $this->arResult['statusMap'] = $statusMap;
             $this->arResult['data'] = $data;
@@ -814,8 +820,9 @@ protected function getHistoryEntriesForLead($leadId)
                 'norm_other' => $normOther,
                 'users' => $managersToProcess,
                 'user_names' => $managerNameMap,
-                'cache_info' => 'РљРµС€: 300 СЃРµРєСѓРЅРґ; РєР°С‚Р°Р»РѕРіРё /custom/antirating/leads Рё /custom/antirating/contacts'
+                'cache_info' => 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts'
             ];
+            $this->arResult['readmeText'] = $readmeText;
 
             $this->arResult['controlSum'] = $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages);
             $this->arResult['executionSeconds'] = microtime(true) - $startTime;

@@ -1,6 +1,10 @@
-<?php if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) die(); ?>
+﻿<?php if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) die(); ?>
 <?php
-global $APPLICATION;
+global $APPLICATION, $USER;
+
+$readmeTextRaw = $arResult['readmeText'] ?? '';
+$readmeText = $readmeTextRaw !== '' ? nl2br(htmlspecialcharsbx($readmeTextRaw)) : '';
+
 $dateFrom = htmlspecialcharsbx($arResult['filterValues']['DATE_FROM'] ?? '');
 $dateTo = htmlspecialcharsbx($arResult['filterValues']['DATE_TO'] ?? '');
 $scores = $arResult['scores'] ?? [];
@@ -14,7 +18,7 @@ $normNewVal = htmlspecialcharsbx((string)($settings['norm_new'] ?? '1'));
 $normOtherVal = htmlspecialcharsbx((string)($settings['norm_other'] ?? '5'));
 $usersList = $settings['users'] ?? [];
 $userNames = $settings['user_names'] ?? [];
-$cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, каталоги /custom/antirating/leads и /custom/antirating/contacts');
+$cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts');
 
 \Bitrix\Main\UI\Extension::load('ui.entity-selector');
 ?>
@@ -31,54 +35,74 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
     .ar-pill button { border:none; background:transparent; cursor:pointer; color:#888; font-size:12px; line-height:1; }
     .ar-input { padding:6px 8px; border:1px solid #dfe3e8; border-radius:4px; min-width:80px; }
     .ar-button { padding:6px 10px; border:1px solid #2f7be5; background:#2f7be5; color:#fff; border-radius:4px; cursor:pointer; }
+    .ar-button--ghost { background:#ccc; border-color:#ccc; color:#000; }
     .ar-muted { color:#888; font-size:12px; }
     .ar-section-title { font-weight:700; margin:0; font-size:15px; }
     .ar-flex { display:flex; gap:8px; align-items:center; }
+    .ar-table { border-collapse:collapse; width:100%; margin-top:8px; }
+    .ar-table th, .ar-table td { border:1px solid #ccc; padding:6px; }
+    .ar-table th { background:#f5f5f5; }
 </style>
 
-<div class="ar-settings" id="ar-settings">
-    <div class="ar-settings__header" onclick="(function(box){ box.style.display = box.style.display === 'block' ? 'none' : 'block';})(document.getElementById('ar-settings-box'));">
-        <span class="ar-section-title">Настройки (для администраторов)</span>
-        <span class="ar-muted">кликните, чтобы раскрыть</span>
+<div class="ar-settings" id="ar-desc">
+    <div class="ar-settings__header" onclick="(function(box){ box.style.display = box.style.display === 'block' ? 'none' : 'block';})(document.getElementById('ar-desc-box'))">
+        <span class="ar-section-title">Описание отчёта</span>
+        <span class="ar-muted">нажмите, чтобы раскрыть</span>
     </div>
-    <div class="ar-settings__content" id="ar-settings-box">
-        <div class="ar-settings__block">
-            <h4>Настройка нормативов по этапам</h4>
-            <div class="ar-settings__row">
-                <label>NEW:</label>
-                <input type="number" class="ar-input" data-setting-key="norm_new" value="<?= $normNewVal ?>" min="0" step="0.1">
-            </div>
-            <div class="ar-settings__row">
-                <label>Остальные этапы:</label>
-                <input type="number" class="ar-input" data-setting-key="norm_other" value="<?= $normOtherVal ?>" min="0" step="0.1">
-            </div>
-        </div>
-        <div class="ar-settings__block">
-            <h4>Пользователи</h4>
-            <div class="ar-flex" style="margin-bottom:8px;">
-                <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
-                <button type="button" class="ar-button" onclick="arAddUser()">Добавить</button>
-            </div>
-            <div style="margin-top:10px; font-weight:600;">Пользователи, по которым выводится отчёт:</div>
-            <div class="ar-settings__list" id="ar-user-list">
-                <?php foreach ($usersList as $uId): ?>
-                    <?php $label = trim($userNames[$uId] ?? (string)$uId); ?>
-                    <div class="ar-pill" data-user="<?= (int)$uId ?>" data-label="<?= htmlspecialcharsbx($label) ?>">
-                        <?= htmlspecialcharsbx($label) ?>
-                        <button type="button" onclick="this.parentNode.remove()">x</button>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-        <div class="ar-settings__block" style="display:flex; gap:8px; align-items:center;">
-            <button type="button" class="ar-button" onclick="arApplySettings()">Применить</button>
-            <button type="button" class="ar-button" style="background:#ccc; border-color:#ccc; color:#000;" onclick="arCancelSettings()">Отмена</button>
-        </div>
-        <div class="ar-muted" style="padding:4px 0 0 0;">
-            <?= $cacheInfo ?>
-        </div>
+    <div class="ar-settings__content" id="ar-desc-box">
+        <?php if ($readmeText !== ''): ?>
+            <div style="white-space:pre-line;"><?= $readmeText ?></div>
+        <?php else: ?>
+            <div class="ar-muted">Загрузите READ ME.txt в каталог компонента.</div>
+        <?php endif; ?>
     </div>
 </div>
+
+<?php if ($USER->IsAdmin()): ?>
+    <div class="ar-settings" id="ar-settings">
+        <div class="ar-settings__header" onclick="(function(box){ box.style.display = box.style.display === 'block' ? 'none' : 'block';})(document.getElementById('ar-settings-box'))">
+            <span class="ar-section-title">Настройки (для администраторов)</span>
+            <span class="ar-muted">нажмите, чтобы раскрыть</span>
+        </div>
+        <div class="ar-settings__content" id="ar-settings-box">
+            <div class="ar-settings__block">
+                <h4>Настройка нормативов по этапам</h4>
+                <div class="ar-settings__row">
+                    <label style="min-width:90px;">NEW:</label>
+                    <input type="number" class="ar-input" data-setting-key="norm_new" value="<?= $normNewVal ?>" min="0" step="0.1">
+                </div>
+                <div class="ar-settings__row">
+                    <label style="min-width:90px;">Остальные этапы:</label>
+                    <input type="number" class="ar-input" data-setting-key="norm_other" value="<?= $normOtherVal ?>" min="0" step="0.1">
+                </div>
+            </div>
+            <div class="ar-settings__block">
+                <h4>Пользователи</h4>
+                <div class="ar-flex" style="margin-bottom:8px;">
+                    <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
+                    <button type="button" class="ar-button" onclick="arAddUser()">Добавить</button>
+                </div>
+                <div style="margin-top:10px; font-weight:600;">Пользователи, по которым выводится отчёт:</div>
+                <div class="ar-settings__list" id="ar-user-list">
+                    <?php foreach ($usersList as $uId): ?>
+                        <?php $label = trim($userNames[$uId] ?? (string)$uId); ?>
+                        <div class="ar-pill" data-user="<?= (int)$uId ?>" data-label="<?= htmlspecialcharsbx($label) ?>">
+                            <?= htmlspecialcharsbx($label) ?>
+                            <button type="button" onclick="this.parentNode.remove()">x</button>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="ar-settings__block" style="display:flex; gap:8px; align-items:center;">
+                <button type="button" class="ar-button" onclick="arApplySettings()">Применить</button>
+                <button type="button" class="ar-button ar-button--ghost" onclick="arCancelSettings()">Отмена</button>
+            </div>
+            <div class="ar-muted" style="padding:4px 0 0 0;">
+                <?= $cacheInfo ?>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
 
 <form method="get" name="antirating-filter" style="margin-bottom:16px; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
     <input type="hidden" name="SETTINGS_NORM_NEW" id="settings-norm-new" value="<?= $normNewVal ?>">
@@ -108,13 +132,13 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
         ], false);
         ?>
     </div>
-    <div>
-        <button type="submit" class="ui-btn ui-btn-primary">Показать</button>
-        <a href="<?= strtok($APPLICATION->GetCurPageParam('', []), '?') ?>" class="ui-btn ui-btn-link">Сбросить</a>
+    <div style="align-self:flex-end;">
+        <button type="submit" class="ar-button">Показать</button>
     </div>
 </form>
 
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<h3>Лиды</h3>
+<table class="ar-table">
     <thead>
         <tr>
             <th rowspan="2">Ответственный</th>
@@ -136,7 +160,7 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
         </tr>
     </thead>
     <tbody>
-        <?php foreach ($arResult['data'] as $managerName => $stagesData): ?>
+        <?php foreach (($arResult['data'] ?? []) as $managerName => $stagesData): ?>
             <tr>
                 <td><?= htmlspecialchars($managerName) ?></td>
                 <td style="text-align:center;"><?= (int)($leadTotals[$managerName] ?? 0) ?></td>
@@ -144,18 +168,18 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
                 <td style="text-align:right; padding-right:8px;">
                     <?php
                     $closure = $arResult['closureStats'][$managerName] ?? null;
-                    if ($closure && $closure['COUNT'] > 0):
+                    if ($closure && ($closure['COUNT'] ?? 0) > 0) {
                         $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
                         echo round($avgDays, 2);
-                    else:
+                    } else {
                         echo '-';
-                    endif;
+                    }
                     ?>
                 </td>
                 <td style="text-align:center;">
                     <?php
-                    $closureScore = $scores['CLOSURE'][$managerName] ?? null;
-                    echo $closureScore !== null ? (int)$closureScore : '-';
+                    $score = $scores['CLOSURE'][$managerName] ?? null;
+                    echo $score !== null ? (int)$score : '-';
                     ?>
                 </td>
                 <?php foreach ($arResult['stages'] as $stageCode): ?>
@@ -165,13 +189,11 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
                     $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
                     ?>
                     <td style="text-align:center;"><?= $countVal ?></td>
-                    <td style="text-align:right; padding-right:8px;">
-                        <?= $avgDaysStage !== null ? round($avgDaysStage, 2) : '-' ?>
-                    </td>
+                    <td style="text-align:right; padding-right:8px;"><?= $avgDaysStage !== null ? round($avgDaysStage, 2) : '-' ?></td>
                     <td style="text-align:center;">
                         <?php
-                        $stageScore = $scores[$stageCode][$managerName] ?? null;
-                        echo $stageScore !== null ? (int)$stageScore : '-';
+                        $scoreStage = $scores[$stageCode][$managerName] ?? null;
+                        echo $scoreStage !== null ? (int)$scoreStage : '-';
                         ?>
                     </td>
                 <?php endforeach; ?>
@@ -181,13 +203,10 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
 </table>
 
 <?php if (empty($arResult['data'])): ?>
-    <p style="color:#666;">Данные не найдены. Проверьте фильтр и выбранных пользователей.</p>
+    <p style="color:#666;">По выбранным параметрам нет данных. Попробуйте изменить фильтр или список пользователей.</p>
 <?php endif; ?>
 
 <div style="margin-top:12px;">
-    <?php if ($generatedAt): ?>
-        <div>Отчёт сформирован: <?= htmlspecialchars($generatedAt) ?></div>
-    <?php endif; ?>
     <?php if ($controlSum !== null): ?>
         <div>Контрольное число (лиды): <?= round((float)$controlSum, 4) ?></div>
     <?php endif; ?>
@@ -197,7 +216,7 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Кеш: 300 сек, 
 </div>
 
 <h3 style="margin-top:32px;">Контакты</h3>
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; margin-top:8px;">
+<table class="ar-table" style="margin-top:8px;">
     <thead>
         <tr>
             <th>Ответственный</th>
