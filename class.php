@@ -832,6 +832,12 @@ protected function getHistoryEntriesForLead($leadId)
             $normOther = $request->get('SETTINGS_NORM_OTHER') !== null
                 ? (float)$request->get('SETTINGS_NORM_OTHER')
                 : (float)($savedSettings['norm_other'] ?? 5);
+            $leadLimit = $request->get('SETTINGS_LEAD_LIMIT') !== null
+                ? (int)$request->get('SETTINGS_LEAD_LIMIT')
+                : (int)($savedSettings['lead_limit'] ?? 20000);
+            if ($leadLimit <= 0) {
+                $leadLimit = 20000;
+            }
 
             $errors = [];
             $applyFilter = ($request->get('FILTER_APPLY') === 'Y');
@@ -857,6 +863,7 @@ protected function getHistoryEntriesForLead($leadId)
                     'norm_new' => $normNew,
                     'norm_other' => $normOther,
                     'users' => $managersToProcess,
+                    'lead_limit' => $leadLimit,
                 ];
                 try {
                     Option::set('main', 'custom_antirating_settings', Json::encode($toStore));
@@ -876,6 +883,17 @@ protected function getHistoryEntriesForLead($leadId)
             if ($downloadCsv && $applyFilter && empty($errors)) {
                 $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap);
                 return;
+            }
+
+            if ($applyFilter && empty($errors)) {
+                // Проверка лимита по количеству лидов
+                $totalLeadsCount = 0;
+                foreach ($managersToProcess as $mId) {
+                    $totalLeadsCount += $leadService->getLeadsCountByManager($mId, $dateFrom, $dateTo);
+                }
+                if ($totalLeadsCount > $leadLimit) {
+                    $errors[] = 'Превышен лимит в ' . $leadLimit . ' лидов — сузьте период или ответственных';
+                }
             }
 
             if ($applyFilter && empty($errors)) {
@@ -917,7 +935,8 @@ protected function getHistoryEntriesForLead($leadId)
                 'norm_other' => $normOther,
                 'users' => $managersToProcess,
                 'user_names' => $managerNameMap,
-                'cache_info' => 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts'
+                'cache_info' => 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts',
+                'lead_limit' => $leadLimit,
             ];
             $this->arResult['readmeText'] = $readmeText;
 

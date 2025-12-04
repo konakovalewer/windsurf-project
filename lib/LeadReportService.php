@@ -68,9 +68,65 @@ class LeadReportService
         return $result;
     }
 
+    public function getLeadsCountByManager($managerId, ?\Bitrix\Main\Type\DateTime $dateFrom = null, ?\Bitrix\Main\Type\DateTime $dateTo = null): int
+    {
+        if ($managerId <= 0) {
+            return 0;
+        }
+        $filter = [
+            'ASSIGNED_BY_ID' => $managerId,
+            'CHECK_PERMISSIONS' => 'N'
+        ];
+        if ($dateFrom instanceof \Bitrix\Main\Type\DateTime) {
+            $filter['>=DATE_CREATE'] = $dateFrom;
+        }
+        if ($dateTo instanceof \Bitrix\Main\Type\DateTime) {
+            $filter['<=DATE_CREATE'] = $dateTo;
+        }
+
+        $res = \CCrmLead::GetListEx([], $filter, false, false, ['ID']);
+        if ($res && is_object($res)) {
+            // SelectedRowsCount без навигации вернёт общее число
+            $count = (int)$res->SelectedRowsCount();
+            if ($count > 0) {
+                return $count;
+            }
+            // fallback — пересчитать вручную
+            $cnt = 0;
+            while ($res->Fetch()) {
+                $cnt++;
+            }
+            return $cnt;
+        }
+        return 0;
+    }
+
     protected function getStatusHistoryEntriesForLead(int $leadId): array
     {
         $rows = [];
+        // Предпочитаем ORM/Query, чтобы избежать конкатенации SQL
+        if (class_exists('\\Bitrix\\Crm\\History\\Entity\\LeadStatusHistoryTable')) {
+            try {
+                $res = \Bitrix\Crm\History\Entity\LeadStatusHistoryTable::getList([
+                    'filter' => ['=OWNER_ID' => $leadId],
+                    'order' => ['DATE_CREATE' => 'ASC'],
+                    'select' => ['STATUS_ID', 'DATE_CREATE']
+                ]);
+                while ($row = $res->fetch()) {
+                    if (empty($row['STATUS_ID'])) {
+                        continue;
+                    }
+                    $rows[] = [
+                        'STAGE_ID' => $row['STATUS_ID'],
+                        'CREATED_TIME' => $row['DATE_CREATE']
+                    ];
+                }
+                return $rows;
+            } catch (\Throwable $e) {
+                // fallback ниже
+            }
+        }
+
         try {
             $conn = \Bitrix\Main\Application::getConnection();
             $sql = "SELECT STATUS_ID, DATE_CREATE FROM b_crm_lead_status_history WHERE OWNER_ID = " . (int)$leadId . " ORDER BY DATE_CREATE ASC";

@@ -19,6 +19,7 @@ $normOtherVal = htmlspecialcharsbx((string)($settings['norm_other'] ?? '5'));
 $usersList = $settings['users'] ?? [];
 $userNames = $settings['user_names'] ?? [];
 $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts');
+$leadLimitVal = htmlspecialcharsbx((string)($settings['lead_limit'] ?? '20000'));
 $errors = $arResult['errors'] ?? [];
 $applyFilter = (bool)($arResult['applyFilter'] ?? false);
 
@@ -79,6 +80,13 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
                 </div>
             </div>
             <div class="ar-settings__block">
+                <h4>Ограничение по количеству лидов</h4>
+                <div class="ar-settings__row">
+                    <label style="min-width:90px;">Лимит:</label>
+                    <input type="number" class="ar-input" data-setting-key="lead_limit" value="<?= $leadLimitVal ?>" min="1" step="1">
+                </div>
+            </div>
+            <div class="ar-settings__block">
                 <h4>Пользователи</h4>
                 <div class="ar-flex" style="margin-bottom:8px;">
                     <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
@@ -109,6 +117,7 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
 <form method="get" name="antirating-filter" style="margin-bottom:16px; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
     <input type="hidden" name="SETTINGS_NORM_NEW" id="settings-norm-new" value="<?= $normNewVal ?>">
     <input type="hidden" name="SETTINGS_NORM_OTHER" id="settings-norm-other" value="<?= $normOtherVal ?>">
+    <input type="hidden" name="SETTINGS_LEAD_LIMIT" id="settings-lead-limit" value="<?= $leadLimitVal ?>">
     <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
     <input type="hidden" name="SAVE_SETTINGS" id="save-settings" value="">
     <input type="hidden" name="FILTER_APPLY" id="filter-apply" value="">
@@ -364,10 +373,13 @@ BX.ready(function() {
     function arUpdateHidden() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        var leadLimit = document.querySelector('[data-setting-key="lead_limit"]');
         var inputNormNew = document.getElementById('settings-norm-new');
         var inputNormOther = document.getElementById('settings-norm-other');
+        var inputLeadLimit = document.getElementById('settings-lead-limit');
         if (inputNormNew && normNew) inputNormNew.value = normNew.value;
         if (inputNormOther && normOther) inputNormOther.value = normOther.value;
+        if (inputLeadLimit && leadLimit) inputLeadLimit.value = leadLimit.value;
 
         var list = document.getElementById('ar-user-list');
         var ids = [];
