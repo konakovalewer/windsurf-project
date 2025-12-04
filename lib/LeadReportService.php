@@ -392,6 +392,187 @@ class LeadReportService
     }
 
     /**
+     * Пакетная загрузка истории статусов для множества лидов.
+     */
+    protected function preloadStatusHistory(array $leadIds): array
+    {
+        $result = [];
+        if (empty($leadIds)) {
+            return $result;
+        }
+        $chunks = array_chunk($leadIds, 500);
+        foreach ($chunks as $chunk) {
+            if (class_exists('\\Bitrix\\Crm\\History\\Entity\\LeadStatusHistoryTable')) {
+                $res = \Bitrix\Crm\History\Entity\LeadStatusHistoryTable::getList([
+                    'filter' => ['@OWNER_ID' => $chunk],
+                    'order' => ['CREATED_TIME' => 'ASC'],
+                    'select' => ['OWNER_ID', 'STATUS_ID', 'CREATED_TIME']
+                ]);
+                while ($row = $res->fetch()) {
+                    if (empty($row['STATUS_ID'])) {
+                        continue;
+                    }
+                    $ownerId = (int)$row['OWNER_ID'];
+                    if (!isset($result[$ownerId])) {
+                        $result[$ownerId] = [];
+                    }
+                    $result[$ownerId][] = [
+                        'STAGE_ID' => $row['STATUS_ID'],
+                        'CREATED_TIME' => $row['CREATED_TIME']
+                    ];
+                }
+            } else {
+                $conn = \Bitrix\Main\Application::getConnection();
+                $idsStr = implode(',', array_map('intval', $chunk));
+                $sql = "SELECT OWNER_ID, STATUS_ID, CREATED_TIME FROM b_crm_lead_status_history WHERE OWNER_ID IN ({$idsStr}) ORDER BY CREATED_TIME ASC";
+                $res = $conn->query($sql);
+                while ($row = $res->fetch()) {
+                    if (empty($row['STATUS_ID'])) {
+                        continue;
+                    }
+                    $ownerId = (int)$row['OWNER_ID'];
+                    if (!isset($result[$ownerId])) {
+                        $result[$ownerId] = [];
+                    }
+                    $result[$ownerId][] = [
+                        'STAGE_ID' => $row['STATUS_ID'],
+                        'CREATED_TIME' => $row['CREATED_TIME']
+                    ];
+                }
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Пакетная загрузка таймлайна смен статусов по лидам.
+     */
+    protected function preloadTimelineChanges(array $leadIds): array
+    {
+        $result = [];
+        if (empty($leadIds)) {
+            return $result;
+        }
+
+        $bindingClass = null;
+        if (class_exists('\\Bitrix\\Crm\\Timeline\\Entity\\TimelineBindingTable')) {
+            $bindingClass = '\\Bitrix\\Crm\\Timeline\\Entity\\TimelineBindingTable';
+        } elseif (class_exists('\\Bitrix\\Crm\\Timeline\\Entity\\Timeline\\TimelineBindingTable')) {
+            $bindingClass = '\\Bitrix\\Crm\\Timeline\\Entity\\Timeline\\TimelineBindingTable';
+        } else {
+            return $result;
+        }
+
+        $timelineClass = null;
+        if (class_exists('\\Bitrix\\Crm\\Timeline\\Entity\\TimelineTable')) {
+            $timelineClass = '\\Bitrix\\Crm\\Timeline\\Entity\\TimelineTable';
+        } elseif (class_exists('\\Bitrix\\Crm\\TimelineTable')) {
+            $timelineClass = '\\Bitrix\\Crm\\TimelineTable';
+        } else {
+            return $result;
+        }
+
+        $chunks = array_chunk($leadIds, 200);
+        foreach ($chunks as $chunk) {
+            $bindingsRes = $bindingClass::getList([
+                'filter' => [
+                    '=ENTITY_TYPE_ID' => \CCrmOwnerType::Lead,
+                    '@ENTITY_ID' => $chunk
+                ],
+                'select' => ['OWNER_ID', 'ENTITY_ID']
+            ]);
+            $timelineIdsByLead = [];
+            while ($bind = $bindingsRes->fetch()) {
+                $leadId = (int)$bind['ENTITY_ID'];
+                $timelineIdsByLead[$leadId][] = (int)$bind['OWNER_ID'];
+            }
+            if (empty($timelineIdsByLead)) {
+                continue;
+            }
+            $allTimelineIds = [];
+            foreach ($timelineIdsByLead as $ids) {
+                $allTimelineIds = array_merge($allTimelineIds, $ids);
+            }
+            $allTimelineIds = array_values(array_unique($allTimelineIds));
+
+            $rows = $timelineClass::getList([
+                'filter' => ['@ID' => $allTimelineIds],
+                'order' => ['CREATED' => 'ASC'],
+                'select' => ['ID', 'CREATED', 'SETTINGS']
+            ]);
+            $timelineData = [];
+            while ($row = $rows->fetch()) {
+                $timelineData[(int)$row['ID']] = $row;
+            }
+            foreach ($timelineIdsByLead as $leadId => $ids) {
+                foreach ($ids as $tid) {
+                    if (!isset($timelineData[$tid])) {
+                        continue;
+                    }
+                    $row = $timelineData[$tid];
+                    $settings = $row['SETTINGS'];
+                    if (is_string($settings)) {
+                        try {
+                            $settings = \Bitrix\Main\Web\Json::decode($settings);
+                        } catch (\Throwable $e) {
+                            $settings = null;
+                        }
+                    }
+                    if (!is_array($settings) || ($settings['FIELD'] ?? null) !== 'STATUS_ID') {
+                        continue;
+                    }
+                    if (!isset($result[$leadId])) {
+                        $result[$leadId] = [];
+                    }
+                    $result[$leadId][] = [
+                        'TIME' => $row['CREATED'],
+                        'FROM' => $settings['START'] ?? null,
+                        'TO' => $settings['FINISH'] ?? null
+                    ];
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Пакетная загрузка событий (fallback) по лидам.
+     */
+    protected function preloadEventsHistory(array $leadIds): array
+    {
+        $result = [];
+        if (empty($leadIds) || !class_exists('CCrmEvent')) {
+            return $result;
+        }
+        $chunks = array_chunk($leadIds, 200);
+        foreach ($chunks as $chunk) {
+            $ev = \CCrmEvent::GetList(
+                ['DATE_CREATE' => 'ASC'],
+                ['ENTITY_TYPE' => 'LEAD', '@ENTITY_ID' => $chunk]
+            );
+            while ($row = $ev->Fetch()) {
+                $stageCode = null;
+                if (!empty($row['EVENT_TEXT_2'])) {
+                    $stageCode = trim($row['EVENT_TEXT_2']);
+                }
+                if (!$stageCode) {
+                    continue;
+                }
+                $leadId = (int)$row['ENTITY_ID'];
+                if (!isset($result[$leadId])) {
+                    $result[$leadId] = [];
+                }
+                $result[$leadId][] = [
+                    'STAGE_ID' => $stageCode,
+                    'CREATED_TIME' => $row['DATE_CREATE']
+                ];
+            }
+        }
+        return $result;
+    }
+
+    /**
      * Деталь по одному лиду: длительности по этапам и время до закрытия.
      */
     public function computeLeadDetail(array $lead, array $statusMap): array
@@ -494,6 +675,11 @@ class LeadReportService
                 continue;
             }
 
+            $leadIds = array_keys($leadRows);
+            $statusHistoryMap = $this->preloadStatusHistory($leadIds);
+            $timelineMap = $this->preloadTimelineChanges($leadIds);
+            $eventMap = $this->preloadEventsHistory($leadIds);
+
             foreach ($leadRows as $leadId => $lead) {
                 if (empty($lead)) {
                     continue;
@@ -503,10 +689,47 @@ class LeadReportService
                 $statusHistoryEntries = $this->getStatusHistoryEntriesForLead($leadId);
                 $usedTimeline = false;
 
+                // Batching: заранее загружаем истории/таймлайн/события
+                $statusHistoryEntries = $statusHistoryMap[$leadId] ?? [];
+                $timelineChanges = $timelineMap[$leadId] ?? [];
+                $eventEntries = $eventMap[$leadId] ?? [];
+
+                $usedTimeline = false;
+                $finalClosureMinutes = null;
+
                 if (!empty($statusHistoryEntries)) {
-                    $historyEntries = $statusHistoryEntries;
+                    // считаем по истории
+                    usort($statusHistoryEntries, function ($a, $b) {
+                        return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
+                    });
+                    $count = count($statusHistoryEntries);
+                    for ($i = 0; $i < $count; $i++) {
+                        $cur = $statusHistoryEntries[$i];
+                        $startTs = DateConverter::convertDbStringToTimestamp($cur['CREATED_TIME']);
+                        $endSource = ($i + 1 < $count) ? $statusHistoryEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
+                        $endTs = DateConverter::convertDbStringToTimestamp($endSource);
+                        if ($startTs === null || $endTs === null) {
+                            continue;
+                        }
+                        $minutes = max(0, ($endTs - $startTs) / 60.0);
+                        $stageCode = $cur['STAGE_ID'];
+                        if (!isset($data[$managerName][$stageCode])) {
+                            $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
+                        }
+                        $data[$managerName][$stageCode]['TIME'] += $minutes;
+                        if (!isset($countedStages[$stageCode])) {
+                            $data[$managerName][$stageCode]['COUNT'] += 1;
+                            $countedStages[$stageCode] = true;
+                        }
+                        if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
+                            $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
+                            if ($createTs !== null) {
+                                $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                            }
+                        }
+                    }
                 } else {
-                    $timelineChanges = $this->getTimelineStageChanges($leadId);
+                    // пробуем таймлайн
                     $timelineDurations = $this->calculateDurationsFromTimeline($lead, $statusMap, $timelineChanges);
                     if (!empty($timelineDurations)) {
                         $usedTimeline = true;
@@ -515,14 +738,15 @@ class LeadReportService
                                 $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
                             }
                             $data[$managerName][$stageCode]['TIME'] += $minutes;
-
                             if (!isset($countedStages[$stageCode])) {
                                 $data[$managerName][$stageCode]['COUNT'] += 1;
                                 $countedStages[$stageCode] = true;
                             }
                         }
-
                         $closureDuration = $this->getClosureDurationMinutes($lead, $timelineChanges);
+                        if ($closureDuration === null) {
+                            $closureDuration = $this->getClosureDurationFromHistory($lead, $eventEntries);
+                        }
                         if ($closureDuration !== null) {
                             if (!isset($closureStats[$managerName])) {
                                 $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
@@ -530,65 +754,38 @@ class LeadReportService
                             $closureStats[$managerName]['SUM'] += $closureDuration;
                             $closureStats[$managerName]['COUNT'] += 1;
                         }
-
-                        if ($closureDuration === null) {
-                            $eventEntries = $this->getHistoryEntriesForLead($leadId);
-                            $closureDuration = $this->getClosureDurationFromHistory($lead, $eventEntries);
-                            if ($closureDuration !== null) {
-                                if (!isset($closureStats[$managerName])) {
-                                    $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
-                                }
-                                $closureStats[$managerName]['SUM'] += $closureDuration;
-                                $closureStats[$managerName]['COUNT'] += 1;
-                            }
-                        }
                     } else {
-                        $historyEntries = $this->getHistoryEntriesForLead($leadId);
-                    }
-                }
-
-                if ($usedTimeline) {
-                    continue;
-                }
-
-                if (empty($historyEntries)) {
-                    continue;
-                }
-
-                usort($historyEntries, function ($a, $b) {
-                    return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
-                });
-
-                $count = count($historyEntries);
-                $finalClosureMinutes = null;
-                for ($i = 0; $i < $count; $i++) {
-                    $cur = $historyEntries[$i];
-                    $startTs = DateConverter::convertDbStringToTimestamp($cur['CREATED_TIME']);
-                    $endSource = ($i + 1 < $count) ? $historyEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
-                    $endTs = DateConverter::convertDbStringToTimestamp($endSource);
-
-                    if ($startTs === null || $endTs === null) {
-                        continue;
-                    }
-
-                    $minutes = max(0, ($endTs - $startTs) / 60.0);
-
-                    $stageCode = $cur['STAGE_ID'];
-                    if (!isset($data[$managerName][$stageCode])) {
-                        $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
-                    }
-
-                    $data[$managerName][$stageCode]['TIME'] += $minutes;
-
-                    if (!isset($countedStages[$stageCode])) {
-                        $data[$managerName][$stageCode]['COUNT'] += 1;
-                        $countedStages[$stageCode] = true;
-                    }
-
-                    if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
-                        $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
-                        if ($createTs !== null) {
-                            $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                        // события как запасной вариант
+                        if (!empty($eventEntries)) {
+                            usort($eventEntries, function ($a, $b) {
+                                return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
+                            });
+                            $count = count($eventEntries);
+                            for ($i = 0; $i < $count; $i++) {
+                                $cur = $eventEntries[$i];
+                                $startTs = DateConverter::convertDbStringToTimestamp($cur['CREATED_TIME']);
+                                $endSource = ($i + 1 < $count) ? $eventEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
+                                $endTs = DateConverter::convertDbStringToTimestamp($endSource);
+                                if ($startTs === null || $endTs === null) {
+                                    continue;
+                                }
+                                $minutes = max(0, ($endTs - $startTs) / 60.0);
+                                $stageCode = $cur['STAGE_ID'];
+                                if (!isset($data[$managerName][$stageCode])) {
+                                    $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
+                                }
+                                $data[$managerName][$stageCode]['TIME'] += $minutes;
+                                if (!isset($countedStages[$stageCode])) {
+                                    $data[$managerName][$stageCode]['COUNT'] += 1;
+                                    $countedStages[$stageCode] = true;
+                                }
+                                if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
+                                    $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
+                                    if ($createTs !== null) {
+                                        $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
