@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Детализация по лидам в CSV без записи на диск.
 use Bitrix\Main\Loader;
 use Bitrix\Main\Application;

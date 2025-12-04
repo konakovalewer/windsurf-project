@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Р ВР В·Р СР ВµР Р…Р ВµР Р…Р С‘Р Вµ: 2025-01-05 23:001Р РЋР В»Р С•Р Р…РЎРЏРЎР‚Р В°1
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
