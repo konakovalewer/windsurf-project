@@ -3,6 +3,7 @@
 
 use Bitrix\Main\Data\Cache;
 use Bitrix\Crm\PhaseSemantics;
+use Bitrix\Main\Loader;
 
 class LeadReportService
 {
