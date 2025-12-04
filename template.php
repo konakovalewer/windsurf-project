@@ -19,6 +19,8 @@ $normOtherVal = htmlspecialcharsbx((string)($settings['norm_other'] ?? '5'));
 $usersList = $settings['users'] ?? [];
 $userNames = $settings['user_names'] ?? [];
 $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts');
+$errors = $arResult['errors'] ?? [];
+$applyFilter = (bool)($arResult['applyFilter'] ?? false);
 
 \Bitrix\Main\UI\Extension::load('ui.entity-selector');
 ?>
@@ -109,6 +111,7 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; 
     <input type="hidden" name="SETTINGS_NORM_OTHER" id="settings-norm-other" value="<?= $normOtherVal ?>">
     <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
     <input type="hidden" name="SAVE_SETTINGS" id="save-settings" value="">
+    <input type="hidden" name="FILTER_APPLY" id="filter-apply" value="">
     <div>
         <label style="display:block; margin-bottom:4px;">Дата создания от</label>
         <?php
@@ -134,9 +137,17 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; 
         ?>
     </div>
     <div style="align-self:flex-end;">
-        <button type="submit" class="ar-button">Показать</button>
+        <button type="submit" class="ar-button" onclick="document.getElementById('filter-apply').value='Y'">Показать</button>
     </div>
 </form>
+
+<?php if (!empty($errors)): ?>
+    <div style="margin-bottom:12px; padding:10px; border:1px solid #f5c6cb; background:#f8d7da; color:#721c24;">
+        <?php foreach ($errors as $err): ?>
+            <div><?= htmlspecialcharsbx($err) ?></div>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
 
 <h3>Лиды</h3>
 <table class="ar-table">
@@ -203,7 +214,7 @@ $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; 
     </tbody>
 </table>
 
-<?php if (empty($arResult['data'])): ?>
+<?php if ($applyFilter && empty($arResult['data'])): ?>
     <p style="color:#666;">По выбранным параметрам нет данных. Попробуйте изменить фильтр или список пользователей.</p>
 <?php endif; ?>
 
@@ -368,11 +379,13 @@ BX.ready(function() {
         }
     }
 
-    window.arApplySettings = function() {
+        window.arApplySettings = function() {
         arCaptureInitial();
         arUpdateHidden();
         var saveInput = document.getElementById('save-settings');
         if (saveInput) saveInput.value = 'Y';
+        var filterApply = document.getElementById('filter-apply');
+        if (filterApply) filterApply.value = '';
         var form = document.forms['antirating-filter'];
         if (form) {
             form.submit();
@@ -398,3 +411,4 @@ BX.ready(function() {
     };
 });
 </script>
+

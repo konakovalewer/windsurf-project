@@ -754,6 +754,16 @@ protected function getHistoryEntriesForLead($leadId)
             $request = Application::getInstance()->getContext()->getRequest();
             global $USER;
 
+            // Даты по умолчанию: текущий квартал
+            $now = new \DateTime();
+            $month = (int)$now->format('n');
+            $quarterStartMonth = (int)(floor(($month - 1) / 3) * 3 + 1);
+            $quarterStart = new \DateTime($now->format('Y') . '-' . str_pad((string)$quarterStartMonth, 2, '0', STR_PAD_LEFT) . '-01');
+            $quarterEnd = clone $quarterStart;
+            $quarterEnd->modify('last day of +2 month');
+            $defaultFromRaw = $quarterStart->format('d.m.Y');
+            $defaultToRaw = $quarterEnd->format('d.m.Y');
+
             $savedSettings = [];
             $savedJson = Option::get('main', 'custom_antirating_settings', '');
             if ($savedJson !== '') {
@@ -795,8 +805,26 @@ protected function getHistoryEntriesForLead($leadId)
 
             $dateFromRaw = $request->get('DATE_FROM') ?? ($this->arParams['DATE_FROM'] ?? null);
             $dateToRaw = $request->get('DATE_TO') ?? ($this->arParams['DATE_TO'] ?? null);
+            if (empty($dateFromRaw)) {
+                $dateFromRaw = $defaultFromRaw;
+            }
+            if (empty($dateToRaw)) {
+                $dateToRaw = $defaultToRaw;
+            }
             $dateFrom = $this->parseDateParam($dateFromRaw);
             $dateTo = $this->parseDateParam($dateToRaw);
+            $dateFromPhp = null;
+            $dateToPhp = null;
+            if ($dateFrom instanceof \Bitrix\Main\Type\DateTime) {
+                $dateFromPhp = (new \DateTime('@' . $dateFrom->getTimestamp()))->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+            } elseif ($dateFrom instanceof \DateTimeInterface) {
+                $dateFromPhp = $dateFrom;
+            }
+            if ($dateTo instanceof \Bitrix\Main\Type\DateTime) {
+                $dateToPhp = (new \DateTime('@' . $dateTo->getTimestamp()))->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+            } elseif ($dateTo instanceof \DateTimeInterface) {
+                $dateToPhp = $dateTo;
+            }
 
             $normNew = $request->get('SETTINGS_NORM_NEW') !== null
                 ? (float)$request->get('SETTINGS_NORM_NEW')
@@ -804,6 +832,23 @@ protected function getHistoryEntriesForLead($leadId)
             $normOther = $request->get('SETTINGS_NORM_OTHER') !== null
                 ? (float)$request->get('SETTINGS_NORM_OTHER')
                 : (float)($savedSettings['norm_other'] ?? 5);
+
+            $errors = [];
+            $applyFilter = ($request->get('FILTER_APPLY') === 'Y');
+            if ($applyFilter) {
+                if ($dateFromPhp && $dateToPhp) {
+                    if ($dateToPhp < $dateFromPhp) {
+                        $errors[] = 'Ошибка: дата конца должна быть позже или равна дате начала';
+                    } else {
+                        $intervalDays = $dateFromPhp->diff($dateToPhp)->days + 1;
+                        if ($intervalDays > 367) {
+                            $errors[] = 'Лимит по отчёту: только 365 дней';
+                        }
+                    }
+                } else {
+                    $errors[] = 'Укажите корректные даты';
+                }
+            }
 
             $saveFlag = $request->get('SAVE_SETTINGS');
             if ($saveFlag === 'Y' && is_object($USER) && $USER->IsAdmin()) {
@@ -818,16 +863,26 @@ protected function getHistoryEntriesForLead($leadId)
                 }
             }
 
-            $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages, $normNew, $normOther);
-            $data = $leadsReport['data'];
-            $closureStats = $leadsReport['closureStats'];
-            $scores = $leadsReport['scores'];
-            $leadTotals = $leadsReport['leadTotals'];
-            $leadScoreTotals = $leadsReport['leadScoreTotals'];
+            $data = [];
+            $closureStats = [];
+            $scores = [];
+            $leadTotals = [];
+            $leadScoreTotals = [];
+            $contactsData = [];
+            $contactsScores = [];
 
-            $contactsReport = $contactService->buildContactsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo);
-            $contactsData = $contactsReport['contactsData'];
-            $contactsScores = $contactsReport['contactsScores'];
+            if ($applyFilter && empty($errors)) {
+                $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages, $normNew, $normOther);
+                $data = $leadsReport['data'];
+                $closureStats = $leadsReport['closureStats'];
+                $scores = $leadsReport['scores'];
+                $leadTotals = $leadsReport['leadTotals'];
+                $leadScoreTotals = $leadsReport['leadScoreTotals'];
+
+                $contactsReport = $contactService->buildContactsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo);
+                $contactsData = $contactsReport['contactsData'];
+                $contactsScores = $contactsReport['contactsScores'];
+            }
 
             $readmeText = '';
             $readmePath = __DIR__ . '/READ ME.txt';
@@ -849,7 +904,7 @@ protected function getHistoryEntriesForLead($leadId)
                 'DATE_FROM' => $dateFromRaw,
                 'DATE_TO' => $dateToRaw
             ];
-            $this->arResult['generatedAt'] = date('c');
+            $this->arResult['generatedAt'] = $applyFilter && empty($errors) ? date('c') : null;
             $this->arResult['settings'] = [
                 'norm_new' => $normNew,
                 'norm_other' => $normOther,
@@ -859,8 +914,10 @@ protected function getHistoryEntriesForLead($leadId)
             ];
             $this->arResult['readmeText'] = $readmeText;
 
-            $this->arResult['controlSum'] = $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages);
-            $this->arResult['executionSeconds'] = microtime(true) - $startTime;
+            $this->arResult['controlSum'] = ($applyFilter && empty($errors)) ? $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages) : null;
+            $this->arResult['executionSeconds'] = ($applyFilter && empty($errors)) ? (microtime(true) - $startTime) : null;
+            $this->arResult['errors'] = $errors;
+            $this->arResult['applyFilter'] = $applyFilter;
 
             $this->includeComponentTemplate();
         }
