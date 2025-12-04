@@ -112,6 +112,7 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
     <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
     <input type="hidden" name="SAVE_SETTINGS" id="save-settings" value="">
     <input type="hidden" name="FILTER_APPLY" id="filter-apply" value="">
+    <input type="hidden" name="DOWNLOAD_CSV" id="download-csv" value="">
     <div>
         <label style="display:block; margin-bottom:4px;">Дата создания от</label>
         <?php
@@ -226,6 +227,12 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
         <div>Время формирования (сек): <?= round((float)$executionSeconds, 4) ?></div>
     <?php endif; ?>
 </div>
+
+<?php if ($applyFilter && empty($errors)): ?>
+    <div style="margin-top:10px;">
+        <button type="button" class="ar-button" onclick="arDownloadCsv()">Скачать детализацию (CSV)</button>
+    </div>
+<?php endif; ?>
 
 <h3 style="margin-top:32px;">Контакты</h3>
 <table class="ar-table" style="margin-top:8px;">
@@ -408,6 +415,19 @@ BX.ready(function() {
         arUpdateHidden();
         var saveInput = document.getElementById('save-settings');
         if (saveInput) saveInput.value = '';
+    };
+
+    window.arDownloadCsv = function() {
+        arUpdateHidden();
+        var dl = document.getElementById('download-csv');
+        var apply = document.getElementById('filter-apply');
+        if (dl) dl.value = 'Y';
+        if (apply) apply.value = 'Y';
+        var form = document.forms['antirating-filter'];
+        if (form) {
+            form.submit();
+        }
+        if (dl) dl.value = '';
     };
 });
 </script>

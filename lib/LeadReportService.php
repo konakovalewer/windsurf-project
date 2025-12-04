@@ -335,6 +335,87 @@ class LeadReportService
         return $scores;
     }
 
+    /**
+     * Деталь по одному лиду: длительности по этапам и время до закрытия.
+     */
+    public function computeLeadDetail(array $lead, array $statusMap): array
+    {
+        $leadId = (int)($lead['ID'] ?? 0);
+        $durations = [];
+        $closureMinutes = null;
+        $source = 'none';
+
+        // 1) Статус-хистори как основной источник
+        $historyEntries = $this->getStatusHistoryEntriesForLead($leadId);
+        if (!empty($historyEntries)) {
+            $this->fillDurationsFromHistory($lead, $historyEntries, $statusMap, $durations, $closureMinutes);
+            $source = 'status_history';
+            return compact('durations', 'closureMinutes', 'source');
+        }
+
+        // 2) Таймлайн
+        $timelineChanges = $this->getTimelineStageChanges($leadId);
+        $timelineDurations = $this->calculateDurationsFromTimeline($lead, $statusMap, $timelineChanges);
+        if (!empty($timelineDurations)) {
+            $durations = $timelineDurations;
+            $closureMinutes = $this->getClosureDurationMinutes($lead, $timelineChanges);
+            if ($closureMinutes === null) {
+                $events = $this->getHistoryEntriesForLead($leadId);
+                $closureMinutes = $this->getClosureDurationFromHistory($lead, $events);
+            }
+            $source = 'timeline';
+            return compact('durations', 'closureMinutes', 'source');
+        }
+
+        // 3) События как запасной вариант
+        $eventHistory = $this->getHistoryEntriesForLead($leadId);
+        if (!empty($eventHistory)) {
+            $this->fillDurationsFromHistory($lead, $eventHistory, $statusMap, $durations, $closureMinutes);
+            $source = 'events';
+            return compact('durations', 'closureMinutes', 'source');
+        }
+
+        return compact('durations', 'closureMinutes', 'source');
+    }
+
+    /**
+     * Вспомогательный расчёт по истории (делится с агрегированным расчётом и детализацией).
+     */
+    protected function fillDurationsFromHistory(array $lead, array $historyEntries, array $statusMap, array &$durations, ?float &$closureMinutes): void
+    {
+        usort($historyEntries, function ($a, $b) {
+            return strtotime($a['CREATED_TIME']) <=> strtotime($b['CREATED_TIME']);
+        });
+
+        $count = count($historyEntries);
+        $closureMinutes = null;
+        for ($i = 0; $i < $count; $i++) {
+            $cur = $historyEntries[$i];
+            $startTs = DateConverter::convertDbStringToTimestamp($cur['CREATED_TIME']);
+            $endSource = ($i + 1 < $count) ? $historyEntries[$i + 1]['CREATED_TIME'] : (new \Bitrix\Main\Type\DateTime())->toString();
+            $endTs = DateConverter::convertDbStringToTimestamp($endSource);
+            if ($startTs === null || $endTs === null) {
+                continue;
+            }
+            $minutes = max(0, ($endTs - $startTs) / 60.0);
+            $stageCode = $cur['STAGE_ID'];
+            if (!isset($statusMap[$stageCode])) {
+                continue;
+            }
+            if (!isset($durations[$stageCode])) {
+                $durations[$stageCode] = 0.0;
+            }
+            $durations[$stageCode] += $minutes;
+
+            if ($closureMinutes === null && $this->isFinalStage($stageCode)) {
+                $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
+                if ($createTs !== null) {
+                    $closureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                }
+            }
+        }
+    }
+
     public function buildLeadsReport(array $managersToProcess, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, array $allStages, float $normNew, float $normOther): array
     {
         $data = [];

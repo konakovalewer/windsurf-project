@@ -835,6 +835,7 @@ protected function getHistoryEntriesForLead($leadId)
 
             $errors = [];
             $applyFilter = ($request->get('FILTER_APPLY') === 'Y');
+            $downloadCsv = ($request->get('DOWNLOAD_CSV') === 'Y');
             if ($applyFilter) {
                 if ($dateFromPhp && $dateToPhp) {
                     if ($dateToPhp < $dateFromPhp) {
@@ -870,6 +871,12 @@ protected function getHistoryEntriesForLead($leadId)
             $leadScoreTotals = [];
             $contactsData = [];
             $contactsScores = [];
+
+            // CSV детализация без вывода шаблона
+            if ($downloadCsv && $applyFilter && empty($errors)) {
+                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap);
+                return;
+            }
 
             if ($applyFilter && empty($errors)) {
                 $leadsReport = $leadService->buildLeadsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $allStages, $normNew, $normOther);
@@ -920,6 +927,68 @@ protected function getHistoryEntriesForLead($leadId)
             $this->arResult['applyFilter'] = $applyFilter;
 
             $this->includeComponentTemplate();
+        }
+
+        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap): void
+        {
+            $leadService = new LeadReportService(new DateConverter());
+            $allStages = array_keys($statusMap);
+            $rows = [];
+
+            foreach ($managers as $managerId) {
+                $leads = $leadService->getLeadsByManager($managerId, $dateFrom, $dateTo);
+                foreach ($leads as $leadId => $lead) {
+                    $detail = $leadService->computeLeadDetail($lead, $statusMap);
+                    $row = [
+                        'RESPONSIBLE' => $managerNameMap[$managerId] ?? ('ID ' . $managerId),
+                        'LEAD_ID' => $leadId,
+                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / 1440, 4) : ''
+                    ];
+                    foreach ($allStages as $stCode) {
+                        $minutes = $detail['durations'][$stCode] ?? null;
+                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / 1440, 4) : '';
+                    }
+                    $rows[] = $row;
+                }
+            }
+
+            $headers = ['Ответственный', 'ID лида', 'Время до закрытия, дни'];
+            $stageHeaders = [];
+            foreach ($allStages as $stCode) {
+                $label = $statusMap[$stCode] ?? $stCode;
+                $headers[] = $label;
+                $stageHeaders[] = 'STAGE_' . $stCode;
+            }
+
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            header('Content-Type: text/csv; charset=windows-1251');
+            header('Content-Disposition: attachment; filename="leads_detail.csv"');
+            $out = fopen('php://output', 'w');
+            // В Excel удобнее CP1251 + запятая как разделитель дробной части
+            $encode = function ($value) {
+                return mb_convert_encoding((string)$value, 'Windows-1251', 'UTF-8');
+            };
+            $formatNumber = function ($val) {
+                if ($val === '' || $val === null) {
+                    return '';
+                }
+                return number_format((float)$val, 4, ',', '');
+            };
+            fputcsv($out, array_map($encode, $headers), ';');
+            foreach ($rows as $r) {
+                $line = [];
+                $line[] = $r['RESPONSIBLE'] ?? '';
+                $line[] = $r['LEAD_ID'] ?? '';
+                $line[] = $formatNumber($r['CLOSURE_DAYS'] ?? '');
+                foreach ($stageHeaders as $stKey) {
+                    $line[] = $formatNumber($r[$stKey] ?? '');
+                }
+                fputcsv($out, array_map($encode, $line), ';');
+            }
+            fclose($out);
+            exit;
         }
         protected function calculateScoresByNorm(array $averageDaysByManager, float $normativeDays): array
         {
