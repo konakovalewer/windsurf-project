@@ -109,8 +109,8 @@ class LeadReportService
             try {
                 $res = \Bitrix\Crm\History\Entity\LeadStatusHistoryTable::getList([
                     'filter' => ['=OWNER_ID' => $leadId],
-                    'order' => ['DATE_CREATE' => 'ASC'],
-                    'select' => ['STATUS_ID', 'DATE_CREATE']
+                    'order' => ['CREATED_TIME' => 'ASC'],
+                    'select' => ['STATUS_ID', 'CREATED_TIME']
                 ]);
                 while ($row = $res->fetch()) {
                     if (empty($row['STATUS_ID'])) {
@@ -118,7 +118,7 @@ class LeadReportService
                     }
                     $rows[] = [
                         'STAGE_ID' => $row['STATUS_ID'],
-                        'CREATED_TIME' => $row['DATE_CREATE']
+                        'CREATED_TIME' => $row['CREATED_TIME']
                     ];
                 }
                 return $rows;
@@ -129,7 +129,7 @@ class LeadReportService
 
         try {
             $conn = \Bitrix\Main\Application::getConnection();
-            $sql = "SELECT STATUS_ID, DATE_CREATE FROM b_crm_lead_status_history WHERE OWNER_ID = " . (int)$leadId . " ORDER BY DATE_CREATE ASC";
+            $sql = "SELECT STATUS_ID, CREATED_TIME FROM b_crm_lead_status_history WHERE OWNER_ID = " . (int)$leadId . " ORDER BY CREATED_TIME ASC";
             $res = $conn->query($sql);
             while ($row = $res->fetch()) {
                 if (empty($row['STATUS_ID'])) {
@@ -137,7 +137,7 @@ class LeadReportService
                 }
                 $rows[] = [
                     'STAGE_ID' => $row['STATUS_ID'],
-                    'CREATED_TIME' => $row['DATE_CREATE']
+                    'CREATED_TIME' => $row['CREATED_TIME']
                 ];
             }
         } catch (\Throwable $e) {
