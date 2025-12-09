@@ -8,10 +8,89 @@ use Bitrix\Main\Loader;
 class LeadReportService
 {
     protected DateConverter $converter;
+    protected array $holidaySet = [];
 
     public function __construct(DateConverter $converter)
     {
         $this->converter = $converter;
+        $this->holidaySet = $this->loadHolidayDates();
+    }
+
+    protected function loadHolidayDates(): array
+    {
+        $set = [];
+        $conn = \Bitrix\Main\Application::getConnection();
+        if (!$conn->isTableExists('b_timeman_work_calendar_exclusion')) {
+            return $set;
+        }
+        try {
+            $res = $conn->query("SELECT YEAR, DATES FROM b_timeman_work_calendar_exclusion");
+            while ($row = $res->fetch()) {
+                $year = (int)$row['YEAR'];
+                $datesJson = $row['DATES'] ?? '';
+                if (!is_string($datesJson) || $datesJson === '') {
+                    continue;
+                }
+                $decoded = json_decode($datesJson, true);
+                if (!is_array($decoded)) {
+                    continue;
+                }
+                foreach ($decoded as $month => $days) {
+                    if (!is_array($days)) {
+                        continue;
+                    }
+                    $m = (int)$month;
+                    foreach ($days as $day => $flag) {
+                        $d = (int)$day;
+                        if ($d <= 0 || $m <= 0 || $year <= 0) {
+                            continue;
+                        }
+                        $key = sprintf('%04d-%02d-%02d', $year, $m, $d);
+                        $set[$key] = true;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+        }
+        return $set;
+    }
+
+    protected function isNonWorkingDay(int $ts): bool
+    {
+        $date = new \DateTime('@' . $ts);
+        $date->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+        $key = $date->format('Y-m-d');
+        // выходные
+        $weekday = (int)$date->format('w'); // 0=Sun,6=Sat
+        if ($weekday === 0 || $weekday === 6) {
+            return true;
+        }
+        // праздники из календаря
+        if (isset($this->holidaySet[$key])) {
+            return true;
+        }
+        return false;
+    }
+
+    protected function calculateWorkingMinutes(?int $startTs, ?int $endTs): float
+    {
+        if ($startTs === null || $endTs === null || $endTs <= $startTs) {
+            return 0.0;
+        }
+        $total = 0.0;
+        $cur = $startTs;
+        while ($cur < $endTs) {
+            $dayStart = (new \DateTime('@' . $cur))->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+            $dayStart->setTime(0, 0, 0);
+            $nextDay = clone $dayStart;
+            $nextDay->modify('+1 day');
+            $dayEndTs = min($endTs, $nextDay->getTimestamp());
+            if (!$this->isNonWorkingDay($cur)) {
+                $total += max(0, ($dayEndTs - $cur) / 60.0);
+            }
+            $cur = $dayEndTs;
+        }
+        return $total;
     }
 
     public function getLeadsByManager($managerId, ?\Bitrix\Main\Type\DateTime $dateFrom = null, ?\Bitrix\Main\Type\DateTime $dateTo = null): array
@@ -227,7 +306,7 @@ class LeadReportService
             }
 
             if ($currentStage && isset($statusMap[$currentStage]) && $startTs !== null) {
-                $minutes = max(0, ($changeTs - $startTs) / 60.0);
+                $minutes = $this->calculateWorkingMinutes($startTs, $changeTs);
                 if (!isset($durations[$currentStage])) {
                     $durations[$currentStage] = 0.0;
                 }
@@ -240,7 +319,7 @@ class LeadReportService
 
         if ($currentStage && isset($statusMap[$currentStage]) && $startTs !== null) {
             $nowTs = time();
-            $minutes = max(0, ($nowTs - $startTs) / 60.0);
+            $minutes = $this->calculateWorkingMinutes($startTs, $nowTs);
             if (!isset($durations[$currentStage])) {
                 $durations[$currentStage] = 0.0;
             }
@@ -278,7 +357,7 @@ class LeadReportService
                 continue;
             }
 
-            return max(0, ($closureTs - $createTs) / 60.0);
+            return $this->calculateWorkingMinutes($createTs, $closureTs);
         }
 
         return null;
@@ -343,7 +422,7 @@ class LeadReportService
                 continue;
             }
 
-            return max(0, ($stageTs - $createTs) / 60.0);
+            return $this->calculateWorkingMinutes($createTs, $stageTs);
         }
 
         return null;
@@ -634,7 +713,7 @@ class LeadReportService
             if ($startTs === null || $endTs === null) {
                 continue;
             }
-            $minutes = max(0, ($endTs - $startTs) / 60.0);
+            $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
             $stageCode = $cur['STAGE_ID'];
             if (!isset($statusMap[$stageCode])) {
                 continue;
@@ -647,7 +726,7 @@ class LeadReportService
             if ($closureMinutes === null && $this->isFinalStage($stageCode)) {
                 $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                 if ($createTs !== null) {
-                    $closureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                    $closureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
                 }
             }
         }
@@ -711,7 +790,7 @@ class LeadReportService
                         if ($startTs === null || $endTs === null) {
                             continue;
                         }
-                        $minutes = max(0, ($endTs - $startTs) / 60.0);
+                        $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
                         $stageCode = $cur['STAGE_ID'];
                         if (!isset($data[$managerName][$stageCode])) {
                             $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
@@ -724,7 +803,7 @@ class LeadReportService
                         if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                             $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                             if ($createTs !== null) {
-                                $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                                $finalClosureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
                             }
                         }
                     }
@@ -769,7 +848,7 @@ class LeadReportService
                                 if ($startTs === null || $endTs === null) {
                                     continue;
                                 }
-                                $minutes = max(0, ($endTs - $startTs) / 60.0);
+                                $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
                                 $stageCode = $cur['STAGE_ID'];
                                 if (!isset($data[$managerName][$stageCode])) {
                                     $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
@@ -782,7 +861,7 @@ class LeadReportService
                                 if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                                     $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                                     if ($createTs !== null) {
-                                        $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                                        $finalClosureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
                                     }
                                 }
                             }
