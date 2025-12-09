@@ -160,13 +160,13 @@ foreach ($managers as $managerId) {
         $row = [
             'LEAD_ID' => $leadId,
             'RESPONSIBLE' => $managerNames[$managerId] ?? ('ID ' . $managerId),
-            'CLOSURE_DAYS' => ($calc['closure'] !== null) ? round($calc['closure']/1440, 4) : '',
+            'CLOSURE_DAYS' => ($calc['closure'] !== null) ? round($calc['closure']/480, 4) : '',
         ];
         foreach ($allStages as $stCode) {
             $minutes = $calc['durations'][$stCode] ?? null;
             $count = ($minutes !== null && $minutes > 0) ? 1 : 0;
             $row['COUNT_'.$stCode] = $count;
-            $row['TIME_'.$stCode] = $minutes !== null ? round($minutes/1440, 4) : '';
+            $row['TIME_'.$stCode] = $minutes !== null ? round($minutes/480, 4) : '';
         }
         $rows[] = $row;
     }

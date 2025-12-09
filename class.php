@@ -578,7 +578,7 @@ protected function getHistoryEntriesForLead($leadId)
                 foreach ($data as $managerName => $stagesData) {
                     $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
                     $stageAverages[$stCode][$managerName] = $avgDaysStage;
                 }
             }
@@ -587,7 +587,7 @@ protected function getHistoryEntriesForLead($leadId)
             foreach ($data as $managerName => $_) {
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
                 } else {
                     $closureAverages[$managerName] = null;
                 }
@@ -708,7 +708,7 @@ protected function getHistoryEntriesForLead($leadId)
 
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
                     $controlSum += (float)$avgDays;
                 }
                 if (isset($scores['CLOSURE'][$managerName])) {
@@ -718,7 +718,7 @@ protected function getHistoryEntriesForLead($leadId)
                 foreach ($allStages as $stageCode) {
                     $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
 
                     $controlSum += (float)$countVal;
                     if ($avgDaysStage !== null) {
@@ -961,11 +961,11 @@ protected function getHistoryEntriesForLead($leadId)
                     $row = [
                         'RESPONSIBLE' => $managerNameMap[$managerId] ?? ('ID ' . $managerId),
                         'LEAD_ID' => $leadId,
-                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / 1440, 4) : ''
+                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / 480, 4) : ''
                     ];
                     foreach ($allStages as $stCode) {
                         $minutes = $detail['durations'][$stCode] ?? null;
-                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / 1440, 4) : '';
+                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / 480, 4) : '';
                     }
                     $rows[] = $row;
                 }

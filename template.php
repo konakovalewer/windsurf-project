@@ -210,7 +210,7 @@ usort($leadManagers, function($a, $b) use ($leadScoreTotals) {
                     <?php
                     $closure = $arResult['closureStats'][$managerName] ?? null;
                     if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                        $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                        $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
                         $val = round($avgDays, 2);
                         echo ($val != 0.0) ? $val : '-';
                     } else {
@@ -228,7 +228,7 @@ usort($leadManagers, function($a, $b) use ($leadScoreTotals) {
                     <?php
                     $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
                     ?>
                     <td style="text-align:center;"><?= $countVal !== 0 ? $countVal : '-' ?></td>
                     <td style="text-align:right; padding-right:8px;"><?= $avgDaysStage !== null && $avgDaysStage != 0.0 ? round($avgDaysStage, 2) : '-' ?></td>

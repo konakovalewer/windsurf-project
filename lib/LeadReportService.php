@@ -889,7 +889,7 @@ class LeadReportService
             foreach ($data as $managerName => $stagesData) {
                 $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
                 $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
                 $stageAverages[$stCode][$managerName] = $avgDaysStage;
             }
         }
@@ -898,7 +898,7 @@ class LeadReportService
         foreach ($data as $managerName => $_) {
             $closure = $closureStats[$managerName] ?? null;
             if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
             } else {
                 $closureAverages[$managerName] = null;
             }
