@@ -9,11 +9,28 @@ class LeadReportService
 {
     protected DateConverter $converter;
     protected array $holidaySet = [];
+    protected array $manualHolidaysMd = []; // формат MM-DD
+    protected int $workStartSeconds = 9 * 3600;
+    protected int $workEndSeconds = 18 * 3600;
 
     public function __construct(DateConverter $converter)
     {
         $this->converter = $converter;
         $this->holidaySet = $this->loadHolidayDates();
+    }
+
+    public function configureWorktime(int $startSeconds, int $endSeconds, array $manualHolidaysMd): void
+    {
+        // защита от неверных значений
+        if ($startSeconds < 0 || $startSeconds >= 86400) {
+            $startSeconds = 9 * 3600;
+        }
+        if ($endSeconds <= $startSeconds || $endSeconds > 86400) {
+            $endSeconds = 18 * 3600;
+        }
+        $this->workStartSeconds = $startSeconds;
+        $this->workEndSeconds = $endSeconds;
+        $this->manualHolidaysMd = $manualHolidaysMd;
     }
 
     protected function loadHolidayDates(): array
@@ -65,6 +82,11 @@ class LeadReportService
         if ($weekday === 0 || $weekday === 6) {
             return true;
         }
+        // ручные праздники MM-DD
+        $md = $date->format('m-d');
+        if (in_array($md, $this->manualHolidaysMd, true)) {
+            return true;
+        }
         // праздники из календаря
         if (isset($this->holidaySet[$key])) {
             return true;
@@ -79,16 +101,32 @@ class LeadReportService
         }
         $total = 0.0;
         $cur = $startTs;
+        $tz = new \DateTimeZone(date_default_timezone_get());
+        $workStart = $this->workStartSeconds;
+        $workEnd = $this->workEndSeconds;
+        $workDaySeconds = $workEnd - $workStart;
+        if ($workDaySeconds <= 0) {
+            return 0.0;
+        }
         while ($cur < $endTs) {
-            $dayStart = (new \DateTime('@' . $cur))->setTimezone(new \DateTimeZone(date_default_timezone_get()));
-            $dayStart->setTime(0, 0, 0);
-            $nextDay = clone $dayStart;
-            $nextDay->modify('+1 day');
-            $dayEndTs = min($endTs, $nextDay->getTimestamp());
-            if (!$this->isNonWorkingDay($cur)) {
-                $total += max(0, ($dayEndTs - $cur) / 60.0);
+            $day = (new \DateTime('@' . $cur))->setTimezone($tz);
+            $day->setTime(0, 0, 0);
+            $dayStartTs = $day->getTimestamp();
+            $dayWorkStart = $dayStartTs + $workStart;
+            $dayWorkEnd = $dayStartTs + $workEnd;
+            $nextDayTs = $dayStartTs + 86400;
+
+            $segmentStart = max($cur, $dayWorkStart);
+            $segmentEnd = min($endTs, $dayWorkEnd);
+
+            if (!$this->isNonWorkingDay($cur) && $segmentEnd > $segmentStart) {
+                // пропорционально отрезку рабочего дня
+                $segmentSeconds = $segmentEnd - $segmentStart;
+                $minutes = ($segmentSeconds / $workDaySeconds) * 480; // 8 часов = 480 минут
+                $total += $minutes;
             }
-            $cur = $dayEndTs;
+
+            $cur = max($nextDayTs, $segmentEnd);
         }
         return $total;
     }

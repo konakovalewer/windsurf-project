@@ -20,6 +20,9 @@ $usersList = $settings['users'] ?? [];
 $userNames = $settings['user_names'] ?? [];
 $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts');
 $leadLimitVal = htmlspecialcharsbx((string)($settings['lead_limit'] ?? '20000'));
+$workStartVal = htmlspecialcharsbx((string)($settings['work_start'] ?? '09:00'));
+$workEndVal = htmlspecialcharsbx((string)($settings['work_end'] ?? '18:00'));
+$holidaysVal = htmlspecialcharsbx((string)($settings['holidays'] ?? '01.01;02.01'));
 $errors = $arResult['errors'] ?? [];
 $applyFilter = (bool)($arResult['applyFilter'] ?? false);
 
@@ -87,6 +90,22 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
                 </div>
             </div>
             <div class="ar-settings__block">
+                <h4>Рабочий день</h4>
+                <div class="ar-settings__row">
+                    <label style="min-width:90px;">Начало:</label>
+                    <input type="time" class="ar-input" data-setting-key="work_start" value="<?= $workStartVal ?>">
+                </div>
+                <div class="ar-settings__row">
+                    <label style="min-width:90px;">Окончание:</label>
+                    <input type="time" class="ar-input" data-setting-key="work_end" value="<?= $workEndVal ?>">
+                </div>
+                <div class="ar-settings__row">
+                    <label style="min-width:90px;">Праздничные дни:</label>
+                    <input type="text" class="ar-input" data-setting-key="holidays" value="<?= $holidaysVal ?>" placeholder="01.01; 02.01">
+                </div>
+                <div class="ar-muted">Формат праздников: DD.MM через «;». Субботы/воскресенья всегда нерабочие.</div>
+            </div>
+            <div class="ar-settings__block">
                 <h4>Пользователи</h4>
                 <div class="ar-flex" style="margin-bottom:8px;">
                     <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
@@ -118,6 +137,9 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
     <input type="hidden" name="SETTINGS_NORM_NEW" id="settings-norm-new" value="<?= $normNewVal ?>">
     <input type="hidden" name="SETTINGS_NORM_OTHER" id="settings-norm-other" value="<?= $normOtherVal ?>">
     <input type="hidden" name="SETTINGS_LEAD_LIMIT" id="settings-lead-limit" value="<?= $leadLimitVal ?>">
+    <input type="hidden" name="SETTINGS_WORK_START" id="settings-work-start" value="<?= $workStartVal ?>">
+    <input type="hidden" name="SETTINGS_WORK_END" id="settings-work-end" value="<?= $workEndVal ?>">
+    <input type="hidden" name="SETTINGS_HOLIDAYS" id="settings-holidays" value="<?= $holidaysVal ?>">
     <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
     <input type="hidden" name="SAVE_SETTINGS" id="save-settings" value="">
     <input type="hidden" name="FILTER_APPLY" id="filter-apply" value="">
@@ -324,9 +346,15 @@ BX.ready(function() {
     function arCaptureInitial() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        var workStart = document.querySelector('[data-setting-key="work_start"]');
+        var workEnd = document.querySelector('[data-setting-key="work_end"]');
+        var holidays = document.querySelector('[data-setting-key="holidays"]');
         arInitialSettings.norms = {
             norm_new: normNew ? normNew.value : '',
-            norm_other: normOther ? normOther.value : ''
+            norm_other: normOther ? normOther.value : '',
+            work_start: workStart ? workStart.value : '',
+            work_end: workEnd ? workEnd.value : '',
+            holidays: holidays ? holidays.value : ''
         };
         arInitialSettings.users = [];
         var list = document.getElementById('ar-user-list');
@@ -411,12 +439,21 @@ BX.ready(function() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
         var leadLimit = document.querySelector('[data-setting-key="lead_limit"]');
+        var workStart = document.querySelector('[data-setting-key="work_start"]');
+        var workEnd = document.querySelector('[data-setting-key="work_end"]');
+        var holidays = document.querySelector('[data-setting-key="holidays"]');
         var inputNormNew = document.getElementById('settings-norm-new');
         var inputNormOther = document.getElementById('settings-norm-other');
         var inputLeadLimit = document.getElementById('settings-lead-limit');
+        var inputWorkStart = document.getElementById('settings-work-start');
+        var inputWorkEnd = document.getElementById('settings-work-end');
+        var inputHolidays = document.getElementById('settings-holidays');
         if (inputNormNew && normNew) inputNormNew.value = normNew.value;
         if (inputNormOther && normOther) inputNormOther.value = normOther.value;
         if (inputLeadLimit && leadLimit) inputLeadLimit.value = leadLimit.value;
+        if (inputWorkStart && workStart) inputWorkStart.value = workStart.value;
+        if (inputWorkEnd && workEnd) inputWorkEnd.value = workEnd.value;
+        if (inputHolidays && holidays) inputHolidays.value = holidays.value;
 
         var list = document.getElementById('ar-user-list');
         var ids = [];
@@ -458,8 +495,14 @@ BX.ready(function() {
     window.arCancelSettings = function() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        var workStart = document.querySelector('[data-setting-key="work_start"]');
+        var workEnd = document.querySelector('[data-setting-key="work_end"]');
+        var holidays = document.querySelector('[data-setting-key="holidays"]');
         if (normNew) normNew.value = arInitialSettings.norms.norm_new || '';
         if (normOther) normOther.value = arInitialSettings.norms.norm_other || '';
+        if (workStart) workStart.value = arInitialSettings.norms.work_start || '';
+        if (workEnd) workEnd.value = arInitialSettings.norms.work_end || '';
+        if (holidays) holidays.value = arInitialSettings.norms.holidays || '';
         arRenderUsers(arInitialSettings.users);
         arUpdateHidden();
         var saveInput = document.getElementById('save-settings');
