@@ -578,7 +578,7 @@ protected function getHistoryEntriesForLead($leadId)
                 foreach ($data as $managerName => $stagesData) {
                     $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
                     $stageAverages[$stCode][$managerName] = $avgDaysStage;
                 }
             }
@@ -587,7 +587,7 @@ protected function getHistoryEntriesForLead($leadId)
             foreach ($data as $managerName => $_) {
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
+                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
                 } else {
                     $closureAverages[$managerName] = null;
                 }
@@ -708,7 +708,7 @@ protected function getHistoryEntriesForLead($leadId)
 
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
+                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
                     $controlSum += (float)$avgDays;
                 }
                 if (isset($scores['CLOSURE'][$managerName])) {
@@ -718,7 +718,7 @@ protected function getHistoryEntriesForLead($leadId)
                 foreach ($allStages as $stageCode) {
                     $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
 
                     $controlSum += (float)$countVal;
                     if ($avgDaysStage !== null) {
@@ -838,9 +838,6 @@ protected function getHistoryEntriesForLead($leadId)
             if ($leadLimit <= 0) {
                 $leadLimit = 20000;
             }
-            $workStartStr = $request->get('SETTINGS_WORK_START') ?? ($savedSettings['work_start'] ?? '09:00');
-            $workEndStr = $request->get('SETTINGS_WORK_END') ?? ($savedSettings['work_end'] ?? '18:00');
-            $holidaysStr = $request->get('SETTINGS_HOLIDAYS') ?? ($savedSettings['holidays'] ?? '01.01;02.01');
 
             $errors = [];
             $applyFilter = ($request->get('FILTER_APPLY') === 'Y');
@@ -867,23 +864,12 @@ protected function getHistoryEntriesForLead($leadId)
                     'norm_other' => $normOther,
                     'users' => $managersToProcess,
                     'lead_limit' => $leadLimit,
-                    'work_start' => $workStartStr,
-                    'work_end' => $workEndStr,
-                    'holidays' => $holidaysStr,
                 ];
                 try {
                     Option::set('main', 'custom_antirating_settings', Json::encode($toStore));
                 } catch (\Throwable $e) {
                 }
             }
-
-            $workStartSec = $this->parseTimeToSeconds($workStartStr, 9 * 3600);
-            $workEndSec = $this->parseTimeToSeconds($workEndStr, 18 * 3600);
-            $manualHolidaysMd = $this->parseHolidaysList($holidaysStr);
-
-            $leadService = new LeadReportService($converter);
-            $leadService->configureWorktime($workStartSec, $workEndSec, $manualHolidaysMd);
-            $contactService = new ContactReportService();
 
             $data = [];
             $closureStats = [];
@@ -895,7 +881,7 @@ protected function getHistoryEntriesForLead($leadId)
 
             // CSV детализация без вывода шаблона
             if ($downloadCsv && $applyFilter && empty($errors)) {
-                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $workStartSec, $workEndSec, $manualHolidaysMd);
+                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap);
                 return;
             }
 
@@ -951,9 +937,6 @@ protected function getHistoryEntriesForLead($leadId)
                 'user_names' => $managerNameMap,
                 'cache_info' => 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts',
                 'lead_limit' => $leadLimit,
-                'work_start' => $workStartStr,
-                'work_end' => $workEndStr,
-                'holidays' => $holidaysStr,
             ];
             $this->arResult['readmeText'] = $readmeText;
 
@@ -965,10 +948,9 @@ protected function getHistoryEntriesForLead($leadId)
             $this->includeComponentTemplate();
         }
 
-        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, int $workStartSec, int $workEndSec, array $manualHolidaysMd): void
+        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap): void
         {
             $leadService = new LeadReportService(new DateConverter());
-            $leadService->configureWorktime($workStartSec, $workEndSec, $manualHolidaysMd);
             $allStages = array_keys($statusMap);
             $rows = [];
 
@@ -979,11 +961,11 @@ protected function getHistoryEntriesForLead($leadId)
                     $row = [
                         'RESPONSIBLE' => $managerNameMap[$managerId] ?? ('ID ' . $managerId),
                         'LEAD_ID' => $leadId,
-                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / 480, 4) : ''
+                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / 1440, 4) : ''
                     ];
                     foreach ($allStages as $stCode) {
                         $minutes = $detail['durations'][$stCode] ?? null;
-                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / 480, 4) : '';
+                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / 1440, 4) : '';
                     }
                     $rows[] = $row;
                 }
@@ -1067,43 +1049,6 @@ protected function getHistoryEntriesForLead($leadId)
             }
 
             return $scores;
-        }
-        protected function parseTimeToSeconds(string $value, int $default): int
-        {
-            $parts = explode(':', $value);
-            if (count($parts) < 2) {
-                return $default;
-            }
-            $h = (int)$parts[0];
-            $m = (int)$parts[1];
-            if ($h < 0 || $h > 23 || $m < 0 || $m > 59) {
-                return $default;
-            }
-            $sec = $h * 3600 + $m * 60;
-            if ($sec >= 86400) {
-                return $default;
-            }
-            return $sec;
-        }
-
-        protected function parseHolidaysList(string $value): array
-        {
-            $result = [];
-            $parts = preg_split('/[;,\\s]+/', $value);
-            foreach ($parts as $p) {
-                $p = trim($p);
-                if ($p === '') {
-                    continue;
-                }
-                if (preg_match('/^(\\d{2})[\\.\\/-](\\d{2})$/', $p, $m)) {
-                    $md = $m[1] . '-' . $m[2];
-                    $result[] = $md;
-                } elseif (preg_match('/^(\\d{2})(\\d{2})$/', $p, $m)) {
-                    $md = $m[1] . '-' . $m[2];
-                    $result[] = $md;
-                }
-            }
-            return array_values(array_unique($result));
         }
     }
 // refactoring marker

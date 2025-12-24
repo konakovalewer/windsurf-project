@@ -8,127 +8,10 @@ use Bitrix\Main\Loader;
 class LeadReportService
 {
     protected DateConverter $converter;
-    protected array $holidaySet = [];
-    protected array $manualHolidaysMd = []; // формат MM-DD
-    protected int $workStartSeconds = 9 * 3600;
-    protected int $workEndSeconds = 18 * 3600;
 
     public function __construct(DateConverter $converter)
     {
         $this->converter = $converter;
-        $this->holidaySet = $this->loadHolidayDates();
-    }
-
-    public function configureWorktime(int $startSeconds, int $endSeconds, array $manualHolidaysMd): void
-    {
-        // защита от неверных значений
-        if ($startSeconds < 0 || $startSeconds >= 86400) {
-            $startSeconds = 9 * 3600;
-        }
-        if ($endSeconds <= $startSeconds || $endSeconds > 86400) {
-            $endSeconds = 18 * 3600;
-        }
-        $this->workStartSeconds = $startSeconds;
-        $this->workEndSeconds = $endSeconds;
-        $this->manualHolidaysMd = $manualHolidaysMd;
-    }
-
-    protected function loadHolidayDates(): array
-    {
-        $set = [];
-        $conn = \Bitrix\Main\Application::getConnection();
-        if (!$conn->isTableExists('b_timeman_work_calendar_exclusion')) {
-            return $set;
-        }
-        try {
-            $res = $conn->query("SELECT YEAR, DATES FROM b_timeman_work_calendar_exclusion");
-            while ($row = $res->fetch()) {
-                $year = (int)$row['YEAR'];
-                $datesJson = $row['DATES'] ?? '';
-                if (!is_string($datesJson) || $datesJson === '') {
-                    continue;
-                }
-                $decoded = json_decode($datesJson, true);
-                if (!is_array($decoded)) {
-                    continue;
-                }
-                foreach ($decoded as $month => $days) {
-                    if (!is_array($days)) {
-                        continue;
-                    }
-                    $m = (int)$month;
-                    foreach ($days as $day => $flag) {
-                        $d = (int)$day;
-                        if ($d <= 0 || $m <= 0 || $year <= 0) {
-                            continue;
-                        }
-                        $key = sprintf('%04d-%02d-%02d', $year, $m, $d);
-                        $set[$key] = true;
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-        }
-        return $set;
-    }
-
-    protected function isNonWorkingDay(int $ts): bool
-    {
-        $date = new \DateTime('@' . $ts);
-        $date->setTimezone(new \DateTimeZone(date_default_timezone_get()));
-        $key = $date->format('Y-m-d');
-        // выходные
-        $weekday = (int)$date->format('w'); // 0=Sun,6=Sat
-        if ($weekday === 0 || $weekday === 6) {
-            return true;
-        }
-        // ручные праздники MM-DD
-        $md = $date->format('m-d');
-        if (in_array($md, $this->manualHolidaysMd, true)) {
-            return true;
-        }
-        // праздники из календаря
-        if (isset($this->holidaySet[$key])) {
-            return true;
-        }
-        return false;
-    }
-
-    protected function calculateWorkingMinutes(?int $startTs, ?int $endTs): float
-    {
-        if ($startTs === null || $endTs === null || $endTs <= $startTs) {
-            return 0.0;
-        }
-        $total = 0.0;
-        $cur = $startTs;
-        $tz = new \DateTimeZone(date_default_timezone_get());
-        $workStart = $this->workStartSeconds;
-        $workEnd = $this->workEndSeconds;
-        $workDaySeconds = $workEnd - $workStart;
-        if ($workDaySeconds <= 0) {
-            return 0.0;
-        }
-        while ($cur < $endTs) {
-            $day = (new \DateTime('@' . $cur))->setTimezone($tz);
-            $day->setTime(0, 0, 0);
-            $dayStartTs = $day->getTimestamp();
-            $dayWorkStart = $dayStartTs + $workStart;
-            $dayWorkEnd = $dayStartTs + $workEnd;
-            $nextDayTs = $dayStartTs + 86400;
-
-            $segmentStart = max($cur, $dayWorkStart);
-            $segmentEnd = min($endTs, $dayWorkEnd);
-
-            if (!$this->isNonWorkingDay($cur) && $segmentEnd > $segmentStart) {
-                // пропорционально отрезку рабочего дня
-                $segmentSeconds = $segmentEnd - $segmentStart;
-                $minutes = ($segmentSeconds / $workDaySeconds) * 480; // 8 часов = 480 минут
-                $total += $minutes;
-            }
-
-            $cur = max($nextDayTs, $segmentEnd);
-        }
-        return $total;
     }
 
     public function getLeadsByManager($managerId, ?\Bitrix\Main\Type\DateTime $dateFrom = null, ?\Bitrix\Main\Type\DateTime $dateTo = null): array
@@ -344,7 +227,7 @@ class LeadReportService
             }
 
             if ($currentStage && isset($statusMap[$currentStage]) && $startTs !== null) {
-                $minutes = $this->calculateWorkingMinutes($startTs, $changeTs);
+                $minutes = max(0, ($changeTs - $startTs) / 60.0);
                 if (!isset($durations[$currentStage])) {
                     $durations[$currentStage] = 0.0;
                 }
@@ -357,7 +240,7 @@ class LeadReportService
 
         if ($currentStage && isset($statusMap[$currentStage]) && $startTs !== null) {
             $nowTs = time();
-            $minutes = $this->calculateWorkingMinutes($startTs, $nowTs);
+            $minutes = max(0, ($nowTs - $startTs) / 60.0);
             if (!isset($durations[$currentStage])) {
                 $durations[$currentStage] = 0.0;
             }
@@ -395,7 +278,7 @@ class LeadReportService
                 continue;
             }
 
-            return $this->calculateWorkingMinutes($createTs, $closureTs);
+            return max(0, ($closureTs - $createTs) / 60.0);
         }
 
         return null;
@@ -460,7 +343,7 @@ class LeadReportService
                 continue;
             }
 
-            return $this->calculateWorkingMinutes($createTs, $stageTs);
+            return max(0, ($stageTs - $createTs) / 60.0);
         }
 
         return null;
@@ -751,7 +634,7 @@ class LeadReportService
             if ($startTs === null || $endTs === null) {
                 continue;
             }
-            $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
+            $minutes = max(0, ($endTs - $startTs) / 60.0);
             $stageCode = $cur['STAGE_ID'];
             if (!isset($statusMap[$stageCode])) {
                 continue;
@@ -764,7 +647,7 @@ class LeadReportService
             if ($closureMinutes === null && $this->isFinalStage($stageCode)) {
                 $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                 if ($createTs !== null) {
-                    $closureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
+                    $closureMinutes = max(0, ($startTs - $createTs) / 60.0);
                 }
             }
         }
@@ -828,7 +711,7 @@ class LeadReportService
                         if ($startTs === null || $endTs === null) {
                             continue;
                         }
-                        $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
+                        $minutes = max(0, ($endTs - $startTs) / 60.0);
                         $stageCode = $cur['STAGE_ID'];
                         if (!isset($data[$managerName][$stageCode])) {
                             $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
@@ -841,7 +724,7 @@ class LeadReportService
                         if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                             $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                             if ($createTs !== null) {
-                                $finalClosureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
+                                $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
                             }
                         }
                     }
@@ -886,7 +769,7 @@ class LeadReportService
                                 if ($startTs === null || $endTs === null) {
                                     continue;
                                 }
-                                $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
+                                $minutes = max(0, ($endTs - $startTs) / 60.0);
                                 $stageCode = $cur['STAGE_ID'];
                                 if (!isset($data[$managerName][$stageCode])) {
                                     $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
@@ -899,7 +782,7 @@ class LeadReportService
                                 if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                                     $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                                     if ($createTs !== null) {
-                                        $finalClosureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
+                                        $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
                                     }
                                 }
                             }
@@ -927,7 +810,7 @@ class LeadReportService
             foreach ($data as $managerName => $stagesData) {
                 $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
                 $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 480 : null;
+                $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
                 $stageAverages[$stCode][$managerName] = $avgDaysStage;
             }
         }
@@ -936,7 +819,7 @@ class LeadReportService
         foreach ($data as $managerName => $_) {
             $closure = $closureStats[$managerName] ?? null;
             if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 480;
+                $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
             } else {
                 $closureAverages[$managerName] = null;
             }
