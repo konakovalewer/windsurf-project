@@ -418,6 +418,22 @@ protected function getHistoryEntriesForLead($leadId)
             }
         }
 
+        protected function parseTimeToSeconds(string $value, int $default): int
+        {
+            $value = trim($value);
+            if ($value === '') {
+                return $default;
+            }
+            if (preg_match('/^(\\d{1,2}):(\\d{2})$/', $value, $m)) {
+                $h = (int)$m[1];
+                $mns = (int)$m[2];
+                if ($h >= 0 && $h < 24 && $mns >= 0 && $mns < 60) {
+                    return $h * 3600 + $mns * 60;
+                }
+            }
+            return $default;
+        }
+
         protected function parseDateParam($value): ?\Bitrix\Main\Type\DateTime
         {
             if (empty($value) || !is_string($value)) {
@@ -578,7 +594,7 @@ protected function getHistoryEntriesForLead($leadId)
                 foreach ($data as $managerName => $stagesData) {
                     $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / $workDayMinutes : null;
                     $stageAverages[$stCode][$managerName] = $avgDaysStage;
                 }
             }
@@ -587,7 +603,7 @@ protected function getHistoryEntriesForLead($leadId)
             foreach ($data as $managerName => $_) {
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                    $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / $workDayMinutes;
                 } else {
                     $closureAverages[$managerName] = null;
                 }
@@ -699,16 +715,19 @@ protected function getHistoryEntriesForLead($leadId)
             ];
         }
 
-        protected function calculateControlSum(array $data, array $leadTotals, array $leadScoreTotals, array $closureStats, array $scores, array $allStages): float
+        protected function calculateControlSum(array $data, array $leadTotals, array $leadScoreTotals, array $closureStats, array $scores, array $allStages, float $workDayMinutes): float
         {
             $controlSum = 0.0;
+            if ($workDayMinutes <= 0) {
+                $workDayMinutes = 480.0;
+            }
             foreach ($data as $managerName => $stagesData) {
                 $controlSum += (float)($leadTotals[$managerName] ?? 0);
                 $controlSum += (float)($leadScoreTotals[$managerName] ?? 0);
 
                 $closure = $closureStats[$managerName] ?? null;
                 if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / $workDayMinutes;
                     $controlSum += (float)$avgDays;
                 }
                 if (isset($scores['CLOSURE'][$managerName])) {
@@ -718,7 +737,7 @@ protected function getHistoryEntriesForLead($leadId)
                 foreach ($allStages as $stageCode) {
                     $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / $workDayMinutes : null;
 
                     $controlSum += (float)$countVal;
                     if ($avgDaysStage !== null) {
@@ -832,6 +851,15 @@ protected function getHistoryEntriesForLead($leadId)
             $normOther = $request->get('SETTINGS_NORM_OTHER') !== null
                 ? (float)$request->get('SETTINGS_NORM_OTHER')
                 : (float)($savedSettings['norm_other'] ?? 5);
+            $workStartRaw = $request->get('SETTINGS_WORK_START') ?? ($savedSettings['work_start'] ?? '09:00');
+            $workEndRaw = $request->get('SETTINGS_WORK_END') ?? ($savedSettings['work_end'] ?? '18:00');
+            $workStartSec = $this->parseTimeToSeconds($workStartRaw, 9 * 3600);
+            $workEndSec = $this->parseTimeToSeconds($workEndRaw, 18 * 3600);
+            if ($workEndSec <= $workStartSec) {
+                $workEndSec = $workStartSec + 8 * 3600;
+            }
+            $workDayMinutes = max(1, ($workEndSec - $workStartSec) / 60);
+            $leadService->configureWorkHours($workStartSec, $workEndSec);
             $leadLimit = $request->get('SETTINGS_LEAD_LIMIT') !== null
                 ? (int)$request->get('SETTINGS_LEAD_LIMIT')
                 : (int)($savedSettings['lead_limit'] ?? 20000);
@@ -864,6 +892,8 @@ protected function getHistoryEntriesForLead($leadId)
                     'norm_other' => $normOther,
                     'users' => $managersToProcess,
                     'lead_limit' => $leadLimit,
+                    'work_start' => $workStartRaw,
+                    'work_end' => $workEndRaw,
                 ];
                 try {
                     Option::set('main', 'custom_antirating_settings', Json::encode($toStore));
@@ -881,7 +911,7 @@ protected function getHistoryEntriesForLead($leadId)
 
             // CSV детализация без вывода шаблона
             if ($downloadCsv && $applyFilter && empty($errors)) {
-                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap);
+                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $workDayMinutes, $workStartSec, $workEndSec);
                 return;
             }
 
@@ -937,10 +967,13 @@ protected function getHistoryEntriesForLead($leadId)
                 'user_names' => $managerNameMap,
                 'cache_info' => 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts',
                 'lead_limit' => $leadLimit,
+                'work_start' => $workStartRaw,
+                'work_end' => $workEndRaw,
+                'work_day_minutes' => $workDayMinutes,
             ];
             $this->arResult['readmeText'] = $readmeText;
 
-            $this->arResult['controlSum'] = ($applyFilter && empty($errors)) ? $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages) : null;
+            $this->arResult['controlSum'] = ($applyFilter && empty($errors)) ? $this->calculateControlSum($data, $leadTotals, $leadScoreTotals, $closureStats, $scores, $allStages, $workDayMinutes) : null;
             $this->arResult['executionSeconds'] = ($applyFilter && empty($errors)) ? (microtime(true) - $startTime) : null;
             $this->arResult['errors'] = $errors;
             $this->arResult['applyFilter'] = $applyFilter;
@@ -948,9 +981,10 @@ protected function getHistoryEntriesForLead($leadId)
             $this->includeComponentTemplate();
         }
 
-        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap): void
+        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, float $workDayMinutes, int $workStartSec, int $workEndSec): void
         {
             $leadService = new LeadReportService(new DateConverter());
+            $leadService->configureWorkHours($workStartSec, $workEndSec);
             $allStages = array_keys($statusMap);
             $rows = [];
 
@@ -961,11 +995,11 @@ protected function getHistoryEntriesForLead($leadId)
                     $row = [
                         'RESPONSIBLE' => $managerNameMap[$managerId] ?? ('ID ' . $managerId),
                         'LEAD_ID' => $leadId,
-                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / 1440, 4) : ''
+                        'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / $workDayMinutes, 4) : ''
                     ];
                     foreach ($allStages as $stCode) {
                         $minutes = $detail['durations'][$stCode] ?? null;
-                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / 1440, 4) : '';
+                        $row['STAGE_' . $stCode] = $minutes !== null ? round($minutes / $workDayMinutes, 4) : '';
                     }
                     $rows[] = $row;
                 }

@@ -151,6 +151,7 @@ if (!empty($managers)) {
 }
 
 $detailService = new LeadDetailService(new DateConverter());
+$workDayMinutes = 480;
 
 $rows = [];
 foreach ($managers as $managerId) {
@@ -160,13 +161,13 @@ foreach ($managers as $managerId) {
         $row = [
             'LEAD_ID' => $leadId,
             'RESPONSIBLE' => $managerNames[$managerId] ?? ('ID ' . $managerId),
-            'CLOSURE_DAYS' => ($calc['closure'] !== null) ? round($calc['closure']/1440, 4) : '',
+            'CLOSURE_DAYS' => ($calc['closure'] !== null) ? round($calc['closure']/$workDayMinutes, 4) : '',
         ];
         foreach ($allStages as $stCode) {
             $minutes = $calc['durations'][$stCode] ?? null;
             $count = ($minutes !== null && $minutes > 0) ? 1 : 0;
             $row['COUNT_'.$stCode] = $count;
-            $row['TIME_'.$stCode] = $minutes !== null ? round($minutes/1440, 4) : '';
+            $row['TIME_'.$stCode] = $minutes !== null ? round($minutes/$workDayMinutes, 4) : '';
         }
         $rows[] = $row;
     }

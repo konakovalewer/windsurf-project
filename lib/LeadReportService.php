@@ -8,10 +8,52 @@ use Bitrix\Main\Loader;
 class LeadReportService
 {
     protected DateConverter $converter;
+    protected int $workStartSec = 9 * 3600; // 09:00
+    protected int $workEndSec = 18 * 3600;  // 18:00
 
     public function __construct(DateConverter $converter)
     {
         $this->converter = $converter;
+    }
+
+    public function configureWorkHours(int $startSec, int $endSec): void
+    {
+        if ($endSec <= $startSec) {
+            $endSec = $startSec + 8 * 3600;
+        }
+        $this->workStartSec = $startSec;
+        $this->workEndSec = $endSec;
+    }
+
+    protected function calculateWorkingMinutes(int $startTs, int $endTs): float
+    {
+        if ($endTs <= $startTs) {
+            return 0.0;
+        }
+        $workSecondsPerDay = max(0, $this->workEndSec - $this->workStartSec);
+        if ($workSecondsPerDay === 0) {
+            return 0.0;
+        }
+
+        $totalSeconds = 0;
+        $dayStart = strtotime('midnight', $startTs);
+
+        while ($dayStart < $endTs) {
+            $dayEnd = $dayStart + 86400;
+            $intervalStart = $dayStart + $this->workStartSec;
+            $intervalEnd = $dayStart + $this->workEndSec;
+
+            $segStart = max($startTs, $intervalStart);
+            $segEnd = min($endTs, $intervalEnd);
+
+            if ($segEnd > $segStart) {
+                $totalSeconds += ($segEnd - $segStart);
+            }
+
+            $dayStart = $dayEnd;
+        }
+
+        return $totalSeconds / 60.0;
     }
 
     public function getLeadsByManager($managerId, ?\Bitrix\Main\Type\DateTime $dateFrom = null, ?\Bitrix\Main\Type\DateTime $dateTo = null): array
@@ -227,7 +269,7 @@ class LeadReportService
             }
 
             if ($currentStage && isset($statusMap[$currentStage]) && $startTs !== null) {
-                $minutes = max(0, ($changeTs - $startTs) / 60.0);
+                $minutes = $this->calculateWorkingMinutes($startTs, $changeTs);
                 if (!isset($durations[$currentStage])) {
                     $durations[$currentStage] = 0.0;
                 }
@@ -240,7 +282,7 @@ class LeadReportService
 
         if ($currentStage && isset($statusMap[$currentStage]) && $startTs !== null) {
             $nowTs = time();
-            $minutes = max(0, ($nowTs - $startTs) / 60.0);
+            $minutes = $this->calculateWorkingMinutes($startTs, $nowTs);
             if (!isset($durations[$currentStage])) {
                 $durations[$currentStage] = 0.0;
             }
@@ -278,7 +320,7 @@ class LeadReportService
                 continue;
             }
 
-            return max(0, ($closureTs - $createTs) / 60.0);
+            return $this->calculateWorkingMinutes($createTs, $closureTs);
         }
 
         return null;
@@ -343,7 +385,7 @@ class LeadReportService
                 continue;
             }
 
-            return max(0, ($stageTs - $createTs) / 60.0);
+            return $this->calculateWorkingMinutes($createTs, $stageTs);
         }
 
         return null;
@@ -634,7 +676,7 @@ class LeadReportService
             if ($startTs === null || $endTs === null) {
                 continue;
             }
-            $minutes = max(0, ($endTs - $startTs) / 60.0);
+            $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
             $stageCode = $cur['STAGE_ID'];
             if (!isset($statusMap[$stageCode])) {
                 continue;
@@ -647,7 +689,7 @@ class LeadReportService
             if ($closureMinutes === null && $this->isFinalStage($stageCode)) {
                 $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                 if ($createTs !== null) {
-                    $closureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                    $closureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
                 }
             }
         }
@@ -711,7 +753,7 @@ class LeadReportService
                         if ($startTs === null || $endTs === null) {
                             continue;
                         }
-                        $minutes = max(0, ($endTs - $startTs) / 60.0);
+                        $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
                         $stageCode = $cur['STAGE_ID'];
                         if (!isset($data[$managerName][$stageCode])) {
                             $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
@@ -724,7 +766,7 @@ class LeadReportService
                         if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                             $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                             if ($createTs !== null) {
-                                $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                                $finalClosureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
                             }
                         }
                     }
@@ -769,7 +811,7 @@ class LeadReportService
                                 if ($startTs === null || $endTs === null) {
                                     continue;
                                 }
-                                $minutes = max(0, ($endTs - $startTs) / 60.0);
+                                $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
                                 $stageCode = $cur['STAGE_ID'];
                                 if (!isset($data[$managerName][$stageCode])) {
                                     $data[$managerName][$stageCode] = ['COUNT' => 0, 'TIME' => 0.0];
@@ -782,7 +824,7 @@ class LeadReportService
                                 if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                                     $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                                     if ($createTs !== null) {
-                                        $finalClosureMinutes = max(0, ($startTs - $createTs) / 60.0);
+                                        $finalClosureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
                                     }
                                 }
                             }
@@ -810,7 +852,7 @@ class LeadReportService
             foreach ($data as $managerName => $stagesData) {
                 $countVal = isset($stagesData[$stCode]['COUNT']) ? (int)$stagesData[$stCode]['COUNT'] : 0;
                 $timeVal = $stagesData[$stCode]['TIME'] ?? null;
-                $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / (($this->workEndSec - $this->workStartSec) / 60) : null;
                 $stageAverages[$stCode][$managerName] = $avgDaysStage;
             }
         }
@@ -819,7 +861,7 @@ class LeadReportService
         foreach ($data as $managerName => $_) {
             $closure = $closureStats[$managerName] ?? null;
             if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                $closureAverages[$managerName] = ($closure['SUM'] / max(1, $closure['COUNT'])) / (($this->workEndSec - $this->workStartSec) / 60);
             } else {
                 $closureAverages[$managerName] = null;
             }
