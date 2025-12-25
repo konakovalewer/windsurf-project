@@ -20,6 +20,7 @@ $normOtherVal = htmlspecialcharsbx((string)($settings['norm_other'] ?? '5'));
 $workStartVal = htmlspecialcharsbx((string)($settings['work_start'] ?? '09:00'));
 $workEndVal = htmlspecialcharsbx((string)($settings['work_end'] ?? '17:00'));
 $workDayMinutesVal = (float)($settings['work_day_minutes'] ?? 480);
+$holidaysVal = htmlspecialcharsbx((string)($settings['holidays'] ?? '01.01,02.01,03.01,04.01'));
 $usersList = $settings['users'] ?? [];
 $userNames = $settings['user_names'] ?? [];
 $cacheInfo = htmlspecialcharsbx($settings['cache_info'] ?? 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts');
@@ -91,6 +92,18 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
                 </div>
             </div>
             <div class="ar-settings__block">
+                <h4>Рабочее время и выходные</h4>
+                <div class="ar-muted">Рабочий день: <?= $workStartVal ?> — <?= $workEndVal ?> (учитывается в расчётах).</div>
+                <div class="ar-muted">Суббота и воскресенье не учитываются.</div>
+            </div>
+            <div class="ar-settings__block">
+                <h4>Выходные и праздничные дни (дд.мм)</h4>
+                <div class="ar-settings__row">
+                    <input type="text" class="ar-input" style="min-width:260px;" data-setting-key="holidays" value="<?= $holidaysVal ?>" placeholder="01.01,02.01,03.01,04.01">
+                </div>
+                <div class="ar-muted">Перечислите даты через запятую; применяются к любому году.</div>
+            </div>
+            <div class="ar-settings__block">
                 <h4>Пользователи</h4>
                 <div class="ar-flex" style="margin-bottom:8px;">
                     <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
@@ -122,6 +135,7 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
     <input type="hidden" name="SETTINGS_NORM_NEW" id="settings-norm-new" value="<?= $normNewVal ?>">
     <input type="hidden" name="SETTINGS_NORM_OTHER" id="settings-norm-other" value="<?= $normOtherVal ?>">
     <input type="hidden" name="SETTINGS_LEAD_LIMIT" id="settings-lead-limit" value="<?= $leadLimitVal ?>">
+    <input type="hidden" name="SETTINGS_HOLIDAYS" id="settings-holidays" value="<?= $holidaysVal ?>">
     <input type="hidden" name="SETTINGS_USERS" id="settings-users" value="<?= htmlspecialcharsbx(implode(',', $usersList)) ?>">
     <input type="hidden" name="SAVE_SETTINGS" id="save-settings" value="">
     <input type="hidden" name="FILTER_APPLY" id="filter-apply" value="">
@@ -322,16 +336,19 @@ uksort($contactRows, function($a, $b) use ($arResult) {
 BX.ready(function() {
     var arInitialSettings = {
         norms: {},
-        users: []
+        users: [],
+        holidays: ''
     };
 
     function arCaptureInitial() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        var holidays = document.querySelector('[data-setting-key="holidays"]');
         arInitialSettings.norms = {
             norm_new: normNew ? normNew.value : '',
             norm_other: normOther ? normOther.value : ''
         };
+        arInitialSettings.holidays = holidays ? holidays.value : '';
         arInitialSettings.users = [];
         var list = document.getElementById('ar-user-list');
         if (list) {
@@ -415,12 +432,15 @@ BX.ready(function() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
         var leadLimit = document.querySelector('[data-setting-key="lead_limit"]');
+        var holidays = document.querySelector('[data-setting-key="holidays"]');
         var inputNormNew = document.getElementById('settings-norm-new');
         var inputNormOther = document.getElementById('settings-norm-other');
         var inputLeadLimit = document.getElementById('settings-lead-limit');
+        var inputHolidays = document.getElementById('settings-holidays');
         if (inputNormNew && normNew) inputNormNew.value = normNew.value;
         if (inputNormOther && normOther) inputNormOther.value = normOther.value;
         if (inputLeadLimit && leadLimit) inputLeadLimit.value = leadLimit.value;
+        if (inputHolidays && holidays) inputHolidays.value = holidays.value;
 
         var list = document.getElementById('ar-user-list');
         var ids = [];
@@ -462,8 +482,10 @@ BX.ready(function() {
     window.arCancelSettings = function() {
         var normNew = document.querySelector('[data-setting-key="norm_new"]');
         var normOther = document.querySelector('[data-setting-key="norm_other"]');
+        var holidays = document.querySelector('[data-setting-key="holidays"]');
         if (normNew) normNew.value = arInitialSettings.norms.norm_new || '';
         if (normOther) normOther.value = arInitialSettings.norms.norm_other || '';
+        if (holidays) holidays.value = arInitialSettings.holidays || '';
         arRenderUsers(arInitialSettings.users);
         arUpdateHidden();
         var saveInput = document.getElementById('save-settings');

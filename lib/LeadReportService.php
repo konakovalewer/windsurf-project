@@ -1,6 +1,6 @@
 
 <?php
-// Updated 2025-12-26: логирование отключено, вывод времени делим по рабочим минутам
+// Updated 2025-12-26: логирование отключено, вывод времени делим по рабочим минутам; учёт выходных и праздников
 
 use Bitrix\Main\Data\Cache;
 use Bitrix\Crm\PhaseSemantics;
@@ -13,6 +13,8 @@ class LeadReportService
     protected int $workEndSec = 17 * 3600;  // 17:00
     protected string $logFile = '/home/bitrix/www/log1712.log';
     protected array $debugLog = [];
+    protected bool $skipWeekends = true;
+    protected array $holidayDays = [];
 
     public function __construct(DateConverter $converter)
     {
@@ -26,6 +28,26 @@ class LeadReportService
         }
         $this->workStartSec = $startSec;
         $this->workEndSec = $endSec;
+    }
+
+    public function setWeekendAndHolidays(string $holidayRaw, bool $skipWeekends = true): void
+    {
+        $this->skipWeekends = $skipWeekends;
+        $this->holidayDays = [];
+        $parts = preg_split('/[;,]/', $holidayRaw);
+        if (is_array($parts)) {
+            foreach ($parts as $part) {
+                $part = trim($part);
+                if ($part === '') {
+                    continue;
+                }
+                // ожидаем формат дд.мм
+                if (preg_match('/^(\\d{1,2})\\.(\\d{1,2})$/', $part, $m)) {
+                    $key = str_pad($m[1], 2, '0', STR_PAD_LEFT) . '.' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
+                    $this->holidayDays[$key] = true;
+                }
+            }
+        }
     }
 
     public function getDebugLog(): array
@@ -48,6 +70,15 @@ class LeadReportService
 
         while ($dayStart < $endTs) {
             $dayEnd = $dayStart + 86400;
+
+            // пропускаем выходные/праздники
+            $weekday = (int)date('w', $dayStart); // 0 = Sunday, 6 = Saturday
+            $dayKey = date('d.m', $dayStart);
+            if (($this->skipWeekends && ($weekday === 0 || $weekday === 6)) || isset($this->holidayDays[$dayKey])) {
+                $dayStart = $dayEnd;
+                continue;
+            }
+
             $intervalStart = $dayStart + $this->workStartSec;
             $intervalEnd = $dayStart + $this->workEndSec;
 

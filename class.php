@@ -853,6 +853,7 @@ protected function getHistoryEntriesForLead($leadId)
                 : (float)($savedSettings['norm_other'] ?? 5);
             $workStartRaw = $request->get('SETTINGS_WORK_START') ?? ($savedSettings['work_start'] ?? '09:00');
             $workEndRaw = $request->get('SETTINGS_WORK_END') ?? ($savedSettings['work_end'] ?? '17:00');
+            $holidayRaw = $request->get('SETTINGS_HOLIDAYS') ?? ($savedSettings['holidays'] ?? '01.01,02.01,03.01,04.01');
             $workStartSec = $this->parseTimeToSeconds($workStartRaw, 9 * 3600);
             $workEndSec = $this->parseTimeToSeconds($workEndRaw, 17 * 3600);
             if ($workEndSec <= $workStartSec) {
@@ -860,6 +861,7 @@ protected function getHistoryEntriesForLead($leadId)
             }
             $workDayMinutes = max(1, ($workEndSec - $workStartSec) / 60);
             $leadService->configureWorkHours($workStartSec, $workEndSec);
+            $leadService->setWeekendAndHolidays($holidayRaw);
             $leadLimit = $request->get('SETTINGS_LEAD_LIMIT') !== null
                 ? (int)$request->get('SETTINGS_LEAD_LIMIT')
                 : (int)($savedSettings['lead_limit'] ?? 20000);
@@ -894,6 +896,7 @@ protected function getHistoryEntriesForLead($leadId)
                     'lead_limit' => $leadLimit,
                     'work_start' => $workStartRaw,
                     'work_end' => $workEndRaw,
+                    'holidays' => $holidayRaw,
                 ];
                 try {
                     Option::set('main', 'custom_antirating_settings', Json::encode($toStore));
@@ -911,7 +914,7 @@ protected function getHistoryEntriesForLead($leadId)
 
             // CSV детализация без вывода шаблона
             if ($downloadCsv && $applyFilter && empty($errors)) {
-                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $workDayMinutes, $workStartSec, $workEndSec);
+                $this->outputCsvDetail($managersToProcess, $managerNameMap, $dateFrom, $dateTo, $statusMap, $workDayMinutes, $workStartSec, $workEndSec, $holidayRaw);
                 return;
             }
 
@@ -970,6 +973,7 @@ protected function getHistoryEntriesForLead($leadId)
                 'work_start' => $workStartRaw,
                 'work_end' => $workEndRaw,
                 'work_day_minutes' => $workDayMinutes,
+                'holidays' => $holidayRaw,
             ];
             $this->arResult['readmeText'] = $readmeText;
 
@@ -981,10 +985,11 @@ protected function getHistoryEntriesForLead($leadId)
             $this->includeComponentTemplate();
         }
 
-        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, float $workDayMinutes, int $workStartSec, int $workEndSec): void
+        protected function outputCsvDetail(array $managers, array $managerNameMap, ?\Bitrix\Main\Type\DateTime $dateFrom, ?\Bitrix\Main\Type\DateTime $dateTo, array $statusMap, float $workDayMinutes, int $workStartSec, int $workEndSec, string $holidayRaw): void
         {
             $leadService = new LeadReportService(new DateConverter());
             $leadService->configureWorkHours($workStartSec, $workEndSec);
+            $leadService->setWeekendAndHolidays($holidayRaw);
             $allStages = array_keys($statusMap);
             $rows = [];
 
