@@ -1,5 +1,6 @@
 
 <?php
+// Updated 2025-12-26: логирование отключено, вывод времени делим по рабочим минутам
 
 use Bitrix\Main\Data\Cache;
 use Bitrix\Crm\PhaseSemantics;
@@ -9,7 +10,9 @@ class LeadReportService
 {
     protected DateConverter $converter;
     protected int $workStartSec = 9 * 3600; // 09:00
-    protected int $workEndSec = 18 * 3600;  // 18:00
+    protected int $workEndSec = 17 * 3600;  // 17:00
+    protected string $logFile = '/home/bitrix/www/log1712.log';
+    protected array $debugLog = [];
 
     public function __construct(DateConverter $converter)
     {
@@ -23,6 +26,11 @@ class LeadReportService
         }
         $this->workStartSec = $startSec;
         $this->workEndSec = $endSec;
+    }
+
+    public function getDebugLog(): array
+    {
+        return $this->debugLog;
     }
 
     protected function calculateWorkingMinutes(int $startTs, int $endTs): float
@@ -433,6 +441,11 @@ class LeadReportService
         return $scores;
     }
 
+    protected function logLeadDetail(int $leadId, string $source, ?float $newMinutes, ?float $closureMinutes): void
+    {
+        // logging disabled
+    }
+
     /**
      * Пакетная загрузка истории статусов для множества лидов.
      */
@@ -654,6 +667,7 @@ class LeadReportService
             return compact('durations', 'closureMinutes', 'source');
         }
 
+        $this->logLeadDetail($leadId, $source, $durations['NEW'] ?? null, $closureMinutes);
         return compact('durations', 'closureMinutes', 'source');
     }
 
@@ -727,6 +741,8 @@ class LeadReportService
                     continue;
                 }
 
+                $logSource = 'none';
+                $leadNewMinutes = null;
                 $countedStages = [];
                 $statusHistoryEntries = $this->getStatusHistoryEntriesForLead($leadId);
                 $usedTimeline = false;
@@ -763,6 +779,9 @@ class LeadReportService
                             $data[$managerName][$stageCode]['COUNT'] += 1;
                             $countedStages[$stageCode] = true;
                         }
+                        if (strtoupper($stageCode) === 'NEW') {
+                            $leadNewMinutes = ($leadNewMinutes ?? 0) + $minutes;
+                        }
                         if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                             $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                             if ($createTs !== null) {
@@ -770,6 +789,7 @@ class LeadReportService
                             }
                         }
                     }
+                    $logSource = 'status_history';
                 } else {
                     // пробуем таймлайн
                     $timelineDurations = $this->calculateDurationsFromTimeline($lead, $statusMap, $timelineChanges);
@@ -784,18 +804,18 @@ class LeadReportService
                                 $data[$managerName][$stageCode]['COUNT'] += 1;
                                 $countedStages[$stageCode] = true;
                             }
+                            if (strtoupper($stageCode) === 'NEW') {
+                                $leadNewMinutes = ($leadNewMinutes ?? 0) + $minutes;
+                            }
                         }
                         $closureDuration = $this->getClosureDurationMinutes($lead, $timelineChanges);
                         if ($closureDuration === null) {
                             $closureDuration = $this->getClosureDurationFromHistory($lead, $eventEntries);
                         }
                         if ($closureDuration !== null) {
-                            if (!isset($closureStats[$managerName])) {
-                                $closureStats[$managerName] = ['SUM' => 0.0, 'COUNT' => 0];
-                            }
-                            $closureStats[$managerName]['SUM'] += $closureDuration;
-                            $closureStats[$managerName]['COUNT'] += 1;
+                            $finalClosureMinutes = $closureDuration;
                         }
+                        $logSource = 'timeline';
                     } else {
                         // события как запасной вариант
                         if (!empty($eventEntries)) {
@@ -821,6 +841,9 @@ class LeadReportService
                                     $data[$managerName][$stageCode]['COUNT'] += 1;
                                     $countedStages[$stageCode] = true;
                                 }
+                                if (strtoupper($stageCode) === 'NEW') {
+                                    $leadNewMinutes = ($leadNewMinutes ?? 0) + $minutes;
+                                }
                                 if ($finalClosureMinutes === null && $this->isFinalStage($stageCode)) {
                                     $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
                                     if ($createTs !== null) {
@@ -828,6 +851,7 @@ class LeadReportService
                                     }
                                 }
                             }
+                            $logSource = 'events';
                         }
                     }
                 }
@@ -839,6 +863,7 @@ class LeadReportService
                     $closureStats[$managerName]['SUM'] += $finalClosureMinutes;
                     $closureStats[$managerName]['COUNT'] += 1;
                 }
+
             }
         }
 

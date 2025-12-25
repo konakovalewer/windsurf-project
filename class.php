@@ -852,9 +852,9 @@ protected function getHistoryEntriesForLead($leadId)
                 ? (float)$request->get('SETTINGS_NORM_OTHER')
                 : (float)($savedSettings['norm_other'] ?? 5);
             $workStartRaw = $request->get('SETTINGS_WORK_START') ?? ($savedSettings['work_start'] ?? '09:00');
-            $workEndRaw = $request->get('SETTINGS_WORK_END') ?? ($savedSettings['work_end'] ?? '18:00');
+            $workEndRaw = $request->get('SETTINGS_WORK_END') ?? ($savedSettings['work_end'] ?? '17:00');
             $workStartSec = $this->parseTimeToSeconds($workStartRaw, 9 * 3600);
-            $workEndSec = $this->parseTimeToSeconds($workEndRaw, 18 * 3600);
+            $workEndSec = $this->parseTimeToSeconds($workEndRaw, 17 * 3600);
             if ($workEndSec <= $workStartSec) {
                 $workEndSec = $workStartSec + 8 * 3600;
             }

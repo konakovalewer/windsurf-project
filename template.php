@@ -1,5 +1,6 @@
 <?php if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) die(); ?>
 <?php
+// Updated 2025-12-26: вывод времени делим на рабочий день (480 мин), логирование отключено
 global $APPLICATION, $USER;
 
 $readmeTextRaw = $arResult['readmeText'] ?? '';
@@ -17,7 +18,7 @@ $settings = $arResult['settings'] ?? [];
 $normNewVal = htmlspecialcharsbx((string)($settings['norm_new'] ?? '1'));
 $normOtherVal = htmlspecialcharsbx((string)($settings['norm_other'] ?? '5'));
 $workStartVal = htmlspecialcharsbx((string)($settings['work_start'] ?? '09:00'));
-$workEndVal = htmlspecialcharsbx((string)($settings['work_end'] ?? '18:00'));
+$workEndVal = htmlspecialcharsbx((string)($settings['work_end'] ?? '17:00'));
 $workDayMinutesVal = (float)($settings['work_day_minutes'] ?? 480);
 $usersList = $settings['users'] ?? [];
 $userNames = $settings['user_names'] ?? [];
@@ -213,7 +214,7 @@ usort($leadManagers, function($a, $b) use ($leadScoreTotals) {
                     <?php
                     $closure = $arResult['closureStats'][$managerName] ?? null;
                     if ($closure && ($closure['COUNT'] ?? 0) > 0) {
-                        $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / 1440;
+                    $avgDays = ($closure['SUM'] / max(1, $closure['COUNT'])) / $workDayMinutesVal;
                         $val = round($avgDays, 2);
                         echo ($val != 0.0) ? $val : '-';
                     } else {
@@ -231,7 +232,7 @@ usort($leadManagers, function($a, $b) use ($leadScoreTotals) {
                     <?php
                     $countVal = isset($stagesData[$stageCode]['COUNT']) ? (int)$stagesData[$stageCode]['COUNT'] : 0;
                     $timeVal = $stagesData[$stageCode]['TIME'] ?? null;
-                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / 1440 : null;
+                    $avgDaysStage = ($countVal > 0 && $timeVal !== null) ? ($timeVal / $countVal) / $workDayMinutesVal : null;
                     ?>
                     <td style="text-align:center;"><?= $countVal !== 0 ? $countVal : '-' ?></td>
                     <td style="text-align:right; padding-right:8px;"><?= $avgDaysStage !== null && $avgDaysStage != 0.0 ? round($avgDaysStage, 2) : '-' ?></td>
