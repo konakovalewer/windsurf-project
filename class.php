@@ -1129,6 +1129,10 @@ protected function getHistoryEntriesForLead($leadId)
             $leadService->setWeekendAndHolidays($holidayRaw);
             $allStages = array_keys($statusMap);
             $rows = [];
+            $context = \Bitrix\Main\Application::getInstance()->getContext();
+            $request = $context->getRequest();
+            $scheme = $request->isHttps() ? 'https://' : 'http://';
+            $baseUrl = $scheme . $request->getHttpHost();
 
             foreach ($managers as $managerId) {
                 $leads = $leadService->getLeadsByManager($managerId, $dateFrom, $dateTo);
@@ -1136,7 +1140,7 @@ protected function getHistoryEntriesForLead($leadId)
                     $detail = $leadService->computeLeadDetail($lead, $statusMap);
                     $row = [
                         'RESPONSIBLE' => $managerNameMap[$managerId] ?? ('ID ' . $managerId),
-                        'LEAD_ID' => $leadId,
+                        'LEAD_ID' => $baseUrl . '/crm/lead/details/' . $leadId . '/',
                         'CLOSURE_DAYS' => ($detail['closureMinutes'] ?? null) !== null ? round($detail['closureMinutes'] / $workDayMinutes, 4) : ''
                     ];
                     foreach ($allStages as $stCode) {
