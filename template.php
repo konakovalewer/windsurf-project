@@ -338,6 +338,37 @@ uksort($contactRows, function($a, $b) use ($arResult) {
     </tbody>
 </table>
 
+<?php
+$incomplete = $arResult['incompleteContacts'] ?? [];
+$currentId = is_object($USER) ? (int)$USER->GetID() : 0;
+?>
+<?php if (!empty($incomplete)): ?>
+    <div style="margin-top:20px;">
+        <h4>Незаполненные контакты</h4>
+        <?php foreach ($incomplete as $managerName => $items): ?>
+            <?php
+                if (empty($items)) continue;
+                $isOpen = false;
+                if ($currentId > 0 && strpos($managerName, (string)$currentId) !== false) {
+                    $isOpen = true;
+                }
+            ?>
+            <details style="margin-bottom:10px;" <?= $isOpen ? 'open' : '' ?>>
+                <summary style="cursor:pointer;"><?= htmlspecialchars($managerName) ?> (<?= count($items) ?>)</summary>
+                <ul style="margin:6px 0 0 18px;">
+                    <?php foreach ($items as $row): ?>
+                        <li>
+                            <a href="/crm/contact/details/<?= (int)$row['ID'] ?>/" target="_blank">
+                                <?= htmlspecialchars($row['TITLE']) ?> (ID <?= (int)$row['ID'] ?>)
+                            </a>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </details>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
+
 <script>
 BX.ready(function() {
     var arInitialSettings = {

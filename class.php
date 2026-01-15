@@ -1039,6 +1039,43 @@ protected function getHistoryEntriesForLead($leadId)
                 $contactsReport = $contactService->buildContactsReport($managersToProcess, $managerNameMap, $dateFrom, $dateTo);
                 $contactsData = $contactsReport['contactsData'];
                 $contactsScores = $contactsReport['contactsScores'];
+
+                // Детализация незаполненных контактов по ответственным
+                $incompleteByManager = [];
+                foreach ($managersToProcess as $mId) {
+                    $mgrName = $managerNameMap[$mId] ?? ('ID ' . $mId);
+                    $contactFilter = [
+                        'ASSIGNED_BY_ID' => $mId,
+                        'CHECK_PERMISSIONS' => 'N'
+                    ];
+                    if ($dateFrom instanceof \Bitrix\Main\Type\DateTime) {
+                        $contactFilter['>=DATE_CREATE'] = $dateFrom;
+                    }
+                    if ($dateTo instanceof \Bitrix\Main\Type\DateTime) {
+                        $contactFilter['<=DATE_CREATE'] = $dateTo;
+                    }
+
+                    $contactRes = \CCrmContact::GetListEx(
+                        ['ID' => 'ASC'],
+                        $contactFilter,
+                        false,
+                        false,
+                        ['ID', 'NAME', 'LAST_NAME', 'POST', 'UF_CRM_5D4832E6850FC']
+                    );
+                    while ($c = $contactRes->Fetch()) {
+                        $interest = $c['UF_CRM_5D4832E6850FC'] ?? null;
+                        $post = $c['POST'] ?? '';
+                        $isEmptyInterest = is_array($interest) ? empty(array_filter($interest)) : (trim((string)$interest) === '');
+                        $isEmptyPost = trim((string)$post) === '';
+                        if ($isEmptyInterest || $isEmptyPost) {
+                            $title = trim(($c['NAME'] ?? '') . ' ' . ($c['LAST_NAME'] ?? ''));
+                            $incompleteByManager[$mgrName][] = [
+                                'ID' => (int)$c['ID'],
+                                'TITLE' => $title !== '' ? $title : ('ID ' . (int)$c['ID'])
+                            ];
+                        }
+                    }
+                }
             }
 
             $readmeText = '';
@@ -1057,6 +1094,7 @@ protected function getHistoryEntriesForLead($leadId)
             $this->arResult['leadScoreTotals'] = $leadScoreTotals;
             $this->arResult['contactsData'] = $contactsData;
             $this->arResult['contactsScores'] = $contactsScores;
+            $this->arResult['incompleteContacts'] = $incompleteByManager ?? [];
             $this->arResult['filterValues'] = [
                 'DATE_FROM' => $dateFromRaw,
                 'DATE_TO' => $dateToRaw
