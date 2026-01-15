@@ -991,7 +991,7 @@ protected function getHistoryEntriesForLead($leadId)
                 $toStore = [
                     'norm_new' => $normNew,
                     'norm_other' => $normOther,
-                    'users' => $managersToProcess,
+                    'users' => $rawTokens,
                     'lead_limit' => $leadLimit,
                     'work_start' => $workStartRaw,
                     'work_end' => $workEndRaw,
