@@ -723,6 +723,13 @@ class LeadReportService
             }
             $minutes = $this->calculateWorkingMinutes($startTs, $endTs);
             $stageCode = $cur['STAGE_ID'];
+            // Сначала проверяем финальную стадию, даже если её нет в statusMap (чтобы closureMinutes не терялось)
+            if ($closureMinutes === null && $this->isFinalStage($stageCode)) {
+                $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
+                if ($createTs !== null) {
+                    $closureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
+                }
+            }
             if (!isset($statusMap[$stageCode])) {
                 continue;
             }
@@ -730,13 +737,6 @@ class LeadReportService
                 $durations[$stageCode] = 0.0;
             }
             $durations[$stageCode] += $minutes;
-
-            if ($closureMinutes === null && $this->isFinalStage($stageCode)) {
-                $createTs = DateConverter::convertDbStringToTimestamp($lead['DATE_CREATE'] ?? null);
-                if ($createTs !== null) {
-                    $closureMinutes = $this->calculateWorkingMinutes($createTs, $startTs);
-                }
-            }
         }
     }
 
