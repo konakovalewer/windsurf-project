@@ -434,6 +434,40 @@ protected function getHistoryEntriesForLead($leadId)
             return $default;
         }
 
+        protected function getDepartmentEmployeesRecursive(int $departmentId): array
+        {
+            $result = [];
+            if ($departmentId <= 0 || !Loader::includeModule('intranet')) {
+                return $result;
+            }
+            $res = \CIntranetUtils::GetDepartmentEmployees($departmentId, true, true, ['ID']);
+            if ($res && is_object($res)) {
+                while ($row = $res->Fetch()) {
+                    $uid = (int)$row['ID'];
+                    if ($uid > 0) {
+                        $result[] = $uid;
+                    }
+                }
+            }
+            return array_values(array_unique($result));
+        }
+
+        protected function getDepartmentName(int $departmentId): ?string
+        {
+            if ($departmentId <= 0 || !Loader::includeModule('iblock') || !Loader::includeModule('intranet')) {
+                return null;
+            }
+            $iblockId = (int)\Bitrix\Main\Config\Option::get('intranet', 'iblock_structure', 0);
+            if ($iblockId <= 0) {
+                return null;
+            }
+            $section = \Bitrix\Iblock\SectionTable::getRow([
+                'select' => ['NAME'],
+                'filter' => ['=ID' => $departmentId, '=IBLOCK_ID' => $iblockId]
+            ]);
+            return $section['NAME'] ?? null;
+        }
+
         protected function parseDateParam($value): ?\Bitrix\Main\Type\DateTime
         {
             if (empty($value) || !is_string($value)) {
@@ -797,15 +831,46 @@ protected function getHistoryEntriesForLead($leadId)
 
             $usersRaw = $request->get('SETTINGS_USERS') ?? '';
             $managersToProcess = [];
-            foreach (explode(',', (string)$usersRaw) as $uId) {
-                $uId = (int)trim($uId);
-                if ($uId > 0) {
-                    $managersToProcess[] = $uId;
+            $rawTokens = [];
+            foreach (explode(',', (string)$usersRaw) as $token) {
+                $token = trim($token);
+                if ($token === '') {
+                    continue;
+                }
+                $rawTokens[] = $token;
+            }
+            if (empty($rawTokens) && !empty($savedSettings['users']) && is_array($savedSettings['users'])) {
+                $rawTokens = array_map('strval', $savedSettings['users']);
+            }
+
+            // Расширяем отделы до сотрудников
+            $deptIds = [];
+            $userIds = [];
+            foreach ($rawTokens as $token) {
+                if (stripos($token, 'D') === 0) {
+                    $deptIds[] = (int)substr($token, 1);
+                } elseif (stripos($token, 'U') === 0) {
+                    $userIds[] = (int)substr($token, 1);
+                } else {
+                    $userIds[] = (int)$token;
                 }
             }
-            if (empty($managersToProcess) && !empty($savedSettings['users']) && is_array($savedSettings['users'])) {
-                $managersToProcess = array_map('intval', $savedSettings['users']);
+            $userIds = array_filter($userIds, fn($v) => $v > 0);
+
+            // Подтягиваем всех сотрудников отделов и подотделов
+            $expandedUsers = $userIds;
+            if (!empty($deptIds) && Loader::includeModule('intranet')) {
+                foreach ($deptIds as $deptId) {
+                    if ($deptId <= 0) {
+                        continue;
+                    }
+                    $emp = $this->getDepartmentEmployeesRecursive($deptId);
+                    foreach ($emp as $uid) {
+                        $expandedUsers[] = $uid;
+                    }
+                }
             }
+            $managersToProcess = array_values(array_unique(array_filter($expandedUsers, fn($v) => $v > 0)));
             $managerId = 0;
 
             $statusMap = $this->getAllStatusesMap();
@@ -819,6 +884,27 @@ protected function getHistoryEntriesForLead($leadId)
                 ]);
                 while ($u = $usersRes->fetch()) {
                     $managerNameMap[(int)$u['ID']] = trim(($u['NAME'] ?? '') . ' ' . ($u['LAST_NAME'] ?? ''));
+                }
+            }
+            // Имена для отделов и исходных токенов
+            $tokenLabels = [];
+            foreach ($rawTokens as $token) {
+                if (stripos($token, 'D') === 0) {
+                    $deptId = (int)substr($token, 1);
+                    $deptName = $this->getDepartmentName($deptId);
+                    if ($deptName !== null) {
+                        $tokenLabels[$token] = $deptName;
+                    }
+                } elseif (stripos($token, 'U') === 0) {
+                    $uId = (int)substr($token, 1);
+                    if (isset($managerNameMap[$uId])) {
+                        $tokenLabels[$token] = $managerNameMap[$uId];
+                    }
+                } else {
+                    $uId = (int)$token;
+                    if (isset($managerNameMap[$uId])) {
+                        $tokenLabels[$token] = $managerNameMap[$uId];
+                    }
                 }
             }
 
@@ -966,8 +1052,8 @@ protected function getHistoryEntriesForLead($leadId)
             $this->arResult['settings'] = [
                 'norm_new' => $normNew,
                 'norm_other' => $normOther,
-                'users' => $managersToProcess,
-                'user_names' => $managerNameMap,
+                'users' => $rawTokens,
+                'user_names' => $tokenLabels,
                 'cache_info' => 'Cache: 300 seconds; directories /custom/antirating/leads and /custom/antirating/contacts',
                 'lead_limit' => $leadLimit,
                 'work_start' => $workStartRaw,

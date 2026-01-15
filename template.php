@@ -106,14 +106,20 @@ $applyFilter = (bool)($arResult['applyFilter'] ?? false);
             <div class="ar-settings__block">
                 <h4>Пользователи</h4>
                 <div class="ar-flex" style="margin-bottom:8px;">
-                    <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID" onclick="arOpenUserSelector()" readonly>
+                    <input type="text" id="ar-user-input" class="ar-input" placeholder="Введите имя или ID или отдел" onclick="arOpenUserSelector()" readonly>
                     <button type="button" class="ar-button" onclick="arAddUser()">Добавить</button>
                 </div>
-                <div style="margin-top:10px; font-weight:600;">Пользователи, по которым выводится отчёт:</div>
+                <div style="margin-top:10px; font-weight:600;">Пользователи/отделы, по которым выводится отчёт:</div>
                 <div class="ar-settings__list" id="ar-user-list">
-                    <?php foreach ($usersList as $uId): ?>
-                        <?php $label = trim($userNames[$uId] ?? (string)$uId); ?>
-                        <div class="ar-pill" data-user="<?= (int)$uId ?>" data-label="<?= htmlspecialcharsbx($label) ?>">
+                    <?php foreach ($usersList as $token): ?>
+                        <?php
+                            $token = (string)$token;
+                            $label = trim($userNames[$token] ?? $token);
+                            $isDept = stripos($token, 'D') === 0;
+                            $dataId = $isDept ? (int)substr($token,1) : (int)preg_replace('/\\D+/', '', $token);
+                            $pillColor = $isDept ? 'style="background:#e1f7e1; border-color:#b4e3b4;"' : '';
+                        ?>
+                        <div class="ar-pill" data-type="<?= $isDept ? 'department' : 'user' ?>" data-user="<?= (int)$dataId ?>" data-label="<?= htmlspecialcharsbx($label) ?>" <?= $pillColor ?>>
                             <?= htmlspecialcharsbx($label) ?>
                             <button type="button" onclick="this.parentNode.remove()">x</button>
                         </div>
@@ -355,7 +361,8 @@ BX.ready(function() {
             list.querySelectorAll('.ar-pill').forEach(function(pill) {
                 arInitialSettings.users.push({
                     id: pill.dataset.user || '',
-                    label: pill.dataset.label || pill.textContent
+                    label: pill.dataset.label || pill.textContent,
+                    type: pill.dataset.type || 'user'
                 });
             });
         }
@@ -367,10 +374,16 @@ BX.ready(function() {
         list.innerHTML = '';
         (users || []).forEach(function(item) {
             var pill = document.createElement('div');
+            var isDept = (item.type || '') === 'department';
             pill.className = 'ar-pill';
+            pill.dataset.type = isDept ? 'department' : 'user';
             pill.dataset.user = item.id;
             pill.dataset.label = item.label;
             pill.textContent = item.label;
+            if (isDept) {
+                pill.style.background = '#e1f7e1';
+                pill.style.borderColor = '#b4e3b4';
+            }
             var btn = document.createElement('button');
             btn.type = 'button';
             btn.textContent = 'x';
@@ -387,6 +400,7 @@ BX.ready(function() {
         if (!input) return;
         var val = (input.value || '').trim();
         var id = input.dataset.userId ? input.dataset.userId.trim() : '';
+        var type = input.dataset.type || 'user';
         if (!val) return;
         var list = document.getElementById('ar-user-list');
         if (!list) return;
@@ -394,7 +408,12 @@ BX.ready(function() {
         pill.className = 'ar-pill';
         pill.dataset.user = id || val;
         pill.dataset.label = val;
+        pill.dataset.type = type;
         pill.textContent = val;
+        if (type === 'department') {
+            pill.style.background = '#e1f7e1';
+            pill.style.borderColor = '#b4e3b4';
+        }
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = 'x';
@@ -403,6 +422,7 @@ BX.ready(function() {
         list.appendChild(pill);
         input.value = '';
         input.dataset.userId = '';
+        input.dataset.type = 'user';
     };
 
     window.arOpenUserSelector = function() {
@@ -411,16 +431,21 @@ BX.ready(function() {
             enableSearch: true,
             multiple: false,
             width: 420,
-            entities: [{ id: 'user' }],
+            entities: [
+                { id: 'user' },
+                { id: 'department', options: { selectMode: 'usersAndDepartments' } }
+            ],
             events: {
                 'Item:onSelect': function(event) {
                     var item = event.getData().item;
                     if (!item) return;
                     var label = item.getTitle() + ' (' + item.getId() + ')';
+                    var type = item.getEntityId() === 'department' ? 'department' : 'user';
                     var input = document.getElementById('ar-user-input');
                     if (input) {
                         input.value = label;
                         input.dataset.userId = item.getId();
+                        input.dataset.type = type;
                     }
                 }
             }
@@ -446,10 +471,10 @@ BX.ready(function() {
         var ids = [];
         if (list) {
             list.querySelectorAll('.ar-pill').forEach(function(pill) {
-                if (pill.dataset.user) {
-                    ids.push(pill.dataset.user);
-                } else {
-                    ids.push(pill.textContent.trim());
+                var type = pill.dataset.type || 'user';
+                var id = pill.dataset.user || '';
+                if (id !== '') {
+                    ids.push((type === 'department' ? 'D' : 'U') + id);
                 }
             });
         }
