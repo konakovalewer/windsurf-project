@@ -876,6 +876,19 @@ protected function getHistoryEntriesForLead($leadId)
             $statusMap = $this->getAllStatusesMap();
             $allStages = array_keys($statusMap);
 
+            // фильтр только активных пользователей
+            $activeUsers = [];
+            if (!empty($managersToProcess)) {
+                $actRes = \Bitrix\Main\UserTable::getList([
+                    'select' => ['ID'],
+                    'filter' => ['@ID' => $managersToProcess, '=ACTIVE' => 'Y']
+                ]);
+                while ($row = $actRes->fetch()) {
+                    $activeUsers[] = (int)$row['ID'];
+                }
+            }
+            $managersToProcess = array_values(array_unique(array_filter($activeUsers, fn($v) => $v > 0)));
+
             $managerNameMap = [];
             if (!empty($managersToProcess)) {
                 $usersRes = \Bitrix\Main\UserTable::getList([
@@ -897,12 +910,12 @@ protected function getHistoryEntriesForLead($leadId)
                     }
                 } elseif (stripos($token, 'U') === 0) {
                     $uId = (int)substr($token, 1);
-                    if (isset($managerNameMap[$uId])) {
+                    if (isset($managerNameMap[$uId])) { // только активные
                         $tokenLabels[$token] = $managerNameMap[$uId];
                     }
                 } else {
                     $uId = (int)$token;
-                    if (isset($managerNameMap[$uId])) {
+                    if (isset($managerNameMap[$uId])) { // только активные
                         $tokenLabels[$token] = $managerNameMap[$uId];
                     }
                 }
